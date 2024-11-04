@@ -1,125 +1,135 @@
 
 # -*- coding: UTF-8 -*-
 import streamlit as st
-import pdfplumber
-import io
-
-import pdfplumber
 import PyPDF2
-import io
+import re
+import random
 
-def extrair_texto_por_linha(pdf_file):
-    linhas = []
+def extract_articles(text):
+    start_index = text.find("Art. ")
+    if start_index == -1:
+        return []
     
-    # Tentativa 1: pdfplumber
-    try:
-        with pdfplumber.open(pdf_file) as pdf:
-            for pagina in pdf.pages:
-                texto = pagina.extract_text()
-                if texto:
-                    linhas.extend(texto.splitlines())
-    except Exception as e:
-        print(f"Erro ao usar pdfplumber: {e}")
+    text = text[start_index:]
+    articles = []
+    matches = re.finditer(r'Art\. \d+º?\.?', text)
+    positions = [match.start() for match in matches]
+    positions.append(len(text))
     
-    # Se pdfplumber falhar, tente PyPDF2
-    if not linhas:
-        try:
-            pdf_file.seek(0)  # Reinicia o ponteiro do arquivo
-            reader = PyPDF2.PdfReader(pdf_file)
-            for page in reader.pages:
-                texto = page.extract_text()
-                if texto:
-                    linhas.extend(texto.splitlines())
-        except Exception as e:
-            print(f"Erro ao usar PyPDF2: {e}")
+    for i in range(len(positions) - 1):
+        article = text[positions[i]:positions[i+1]].strip()
+        if article:
+            articles.append(article)
     
-    return linhas
+    return articles
 
-def corrigir_caracteres(texto):
-    correções = {
-        'Ã£': 'ã', 'Ã¡': 'á', 'Ã©': 'é', 'Ã­': 'í', 'Ã³': 'ó', 'Ãº': 'ú', 'Ã§': 'ç',
-        'Ã¢': 'â', 'Ãª': 'ê', 'Ã´': 'ô',
-        'Ã': 'Á', 'Ã‰': 'É', 'Ã': 'Í', 'Ã"': 'Ó', 'Ãš': 'Ú', 'Ã‡': 'Ç',
-        'Ã‚': 'Â', 'ÃŠ': 'Ê', 'Ã"': 'Ô',
-        'confrontaçóes': 'confrontações', 'lmoveis': 'Imóveis', 'Cartorio': 'Cartório',
-        'conÍrontando': 'confrontando', 'vêrtice': 'vértice', 'Debitos': 'Débitos',
-        'TíTULO': 'TÍTULO', 'Amiqável': 'Amigável', 'matrÍcula': 'matrícula', 'Cedula':'Cédula',
-        'condiçÕes': 'condições', 'condiçôes': 'condições', 'imovel': 'imóvel', 'lmóveis': 'Imóveis', 'Givil':'Civil', 
-        'codigo': 'código', 'lnscrição':'Inscrição',  'lmovel': 'Imóvel', 'lnstituto': 'Instituto', 'Colonizaçáo1': 'Colonização',
-        'ârea': 'área', 'PROPRETÁRn': 'PROPRIETÁRIO', 'lnformaçÕes': 'Informações', 'Doacão': 'Doação', 'Nâo':'Não', 'TÍtulos': 'Títulos',
-        'confrontaçôes': 'confrontações', 'lnformações': 'Informações', 'proprio':'próprio', 'hipotese': 'hipótese', 'imoveis': 'imóveis',
-        'construçáo': 'construção', 'TÍtulo': 'Título', 'imoveis': 'imóveis', 'hiootese': 'hipótese', 'hipotese': 'hipótese', 'medíndo': 'medindo',
-        'Iado': 'lado', 'conÍorme': 'conforme', 'desiqnada': 'designada', 'nâoconstam': 'não constam','Cédular': 'Cedular', 'lmposto': 'Imposto',
-        'Gedular': 'Cedular', 'grâos': 'grãos', 'cooPERATlvA': 'cooperativa', 'vâlida': 'válida', 'lnscriçâo': 'Inscrição',
-        'cartorio':'cartório', 'Uniâo': 'União', 'Federacão': 'Federação', 'alé':'até', 'perÍmetro':'perímetro', 'lnicia-se': 'Inicia-se',
-        'MATRICULA': 'MATRÍCULA', 'Area': 'Área', 'Dou fe': 'Dou fé', 'Colonizaçáo': 'Colonização', 'MarÍtimos': 'Marítimos', 'lmóvel':'Imóvel',
-        'N.o': 'N.', 'Juridicas': 'Jurídicas', 
-
-        # Adicione mais correções conforme necessário
-    }
-    for errado, correto in correções.items():
-        texto = texto.replace(errado, correto)
-    return texto
-
-def cortar_texto(linhas, cortes):
-    return [linhas[inicio:fim] for inicio, fim in cortes if 0 <= inicio < fim <= len(linhas)]
+def create_question_from_article(article):
+    words = article.split()
+    long_word_positions = []
+    
+    for i, word in enumerate(words):
+        if len(word) >= 6 and not word.isupper() and not any(char.isdigit() for char in word):
+            long_word_positions.append(i)
+    
+    if not long_word_positions:
+        return article, "", article
+    
+    start_pos = random.choice(long_word_positions)
+    num_words = min(random.randint(1, 3), len(words) - start_pos)
+    omitted_words = " ".join(words[start_pos:start_pos + num_words])
+    
+    question_text = " ".join(words[:start_pos]) + " ________________________ " + \
+                   " ".join(words[start_pos + num_words:])
+    
+    original_text = article
+    
+    return question_text, omitted_words, original_text
 
 def main():
-    st.set_page_config(page_title="Extrator de Texto de PDF", layout="wide")
-    st.title("Extrator de Texto de PDF com Múltiplos Cortes")
+    st.title("Estudo de Artigos PDF")
     
-    if 'linhas' not in st.session_state:
-        st.session_state.linhas = []
+    input_method = st.radio("Escolha o método de entrada:", 
+                           ["Inserir texto", "Upload de PDF"])
     
-    if 'cortes' not in st.session_state:
-        st.session_state.cortes = []
-
-    col1, col2 = st.columns([1, 1])
-
-    with col1:
-        pdf_file = st.file_uploader("Carregue o arquivo PDF", type=["pdf"])
-        if pdf_file is not None and not st.session_state.linhas:
-            with st.spinner('Extraindo texto do PDF...'):
-                linhas = extrair_texto_por_linha(io.BytesIO(pdf_file.getvalue()))
-                st.session_state.linhas = [corrigir_caracteres(linha) for linha in linhas]
-
-        if st.session_state.linhas:
-            texto_completo = "\n".join(f"{i}: {linha}" for i, linha in enumerate(st.session_state.linhas))
-            st.text_area("Texto original:", value=texto_completo, height=400)
-
-    with col2:
-        if st.session_state.linhas:
-            num_cortes = st.number_input("Quantos trechos deseja cortar?", min_value=1, max_value=10, value=len(st.session_state.cortes) or 1)
-            
-            novo_cortes = []
-            for i in range(num_cortes):
-                with st.expander(f"Trecho {i+1}", expanded=True):
-                    inicio = st.number_input(f"Índice da linha inicial", min_value=0, max_value=len(st.session_state.linhas)-1, key=f"inicio_{i}", value=st.session_state.cortes[i][0] if i < len(st.session_state.cortes) else 0)
-                    
-                    fim_default = st.session_state.cortes[i][1] if i < len(st.session_state.cortes) else min(inicio+10, len(st.session_state.linhas))
-                    fim_default = max(fim_default, inicio + 1)
-                    
-                    fim = st.number_input(f"Índice da linha final", min_value=inicio+1, max_value=len(st.session_state.linhas), key=f"fim_{i}", value=fim_default)
-                    novo_cortes.append((inicio, fim))
-            
-            st.session_state.cortes = novo_cortes
-
-            if st.button("Cortar Texto"):
-                texto_cortado = cortar_texto(st.session_state.linhas, st.session_state.cortes)
-                for i, trecho in enumerate(texto_cortado):
-                    with st.expander(f"Trecho {i+1}", expanded=True):
-                        # Removendo quebras de linha e juntando o texto
-                        texto_sem_quebras = ' '.join(linha.strip() for linha in trecho)
-                        st.text_area("Texto cortado:", value=texto_sem_quebras, height=150)
+    text_content = ""
+    
+    if input_method == "Inserir texto":
+        text_content = st.text_area("Cole o texto aqui:", height=200)
+    else:
+        uploaded_file = st.file_uploader("Faça upload do arquivo PDF", type=['pdf'])
+        if uploaded_file:
+            try:
+                pdf_reader = PyPDF2.PdfReader(uploaded_file)
+                for page in pdf_reader.pages:
+                    text_content += page.extract_text()
+            except Exception as e:
+                st.error(f"Erro ao processar o PDF: {str(e)}")
+    
+    if text_content:
+        articles = extract_articles(text_content)
+        
+        if not articles:
+            st.warning("Nenhum artigo foi encontrado no texto.")
+            return
+        
+        if 'current_article' not in st.session_state:
+            st.session_state.current_article = 0
+            st.session_state.show_answer = False
+            st.session_state.questions = [create_question_from_article(art) for art in articles]
+        
+        # Adiciona o slider para navegar entre os artigos
+        st.session_state.current_article = st.slider("Selecione o artigo", 0, len(articles) - 1, st.session_state.current_article)
+        
+        # Adiciona os botões de navegação
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("Anterior") and st.session_state.current_article > 0:
+                st.session_state.current_article -= 1
+                st.session_state.show_answer = False
+                st.session_state.user_answer = ""
+        
+        with col2:
+            if st.button("Reiniciar"):
+                st.session_state.current_article = 0
+                st.session_state.show_answer = False
+                st.session_state.questions = [create_question_from_article(art) for art in articles]
+                st.session_state.user_answer = ""
+        
+        with col3:
+            if st.button("Próximo") and st.session_state.current_article < len(articles) - 1:
+                st.session_state.current_article += 1
+                st.session_state.show_answer = False
+                st.session_state.user_answer = ""
+        
+        # Mostra o artigo com o trecho omitido
+        question_text, omitted_words, original_text = st.session_state.questions[st.session_state.current_article]
+        st.write(f"Artigo {st.session_state.current_article + 1} de {len(articles)}")
+        st.markdown(f"<div style='text-align: justify;'>{question_text}</div>", unsafe_allow_html=True)
+        
+        # Campo para resposta do usuário
+        if 'user_answer' not in st.session_state:
+            st.session_state.user_answer = ""
+        user_answer = st.text_area("Digite as palavras que faltam:", value=st.session_state.user_answer, height=100)
+        st.session_state.user_answer = user_answer
+        
+        # Botão para verificar resposta
+        if st.button("Verificar Resposta"):
+            st.session_state.show_answer = True
+        
+        # Expander para mostrar a resposta completa
+        with st.expander("Resposta"):
+            if st.session_state.show_answer:
+                st.write("Palavras que faltavam:", omitted_words)
+                st.markdown(f"<div style='text-align: justify;'>{original_text}</div>", unsafe_allow_html=True)
                 
-                # Preparando o texto para download (mantendo as quebras de linha aqui)
-                texto_para_download = "\n\n".join([f"Trecho {i+1}:\n" + "\n".join(trecho) for i, trecho in enumerate(texto_cortado)])
-                st.download_button(
-                    label="Baixar trechos cortados",
-                    data=texto_para_download.encode('utf-8'),
-                    file_name="trechos_cortados.txt",
-                    mime="text/plain"
-                )
+                # Compara a resposta normalizando os textos
+                user_normalized = " ".join(user_answer.strip().lower().split())
+                correct_normalized = " ".join(omitted_words.strip().lower().split())
+                
+                if user_normalized == correct_normalized:
+                    st.success("Correto!")
+                else:
+                    st.error("Incorreto. Compare sua resposta com o texto original.")
 
 if __name__ == "__main__":
     main()
