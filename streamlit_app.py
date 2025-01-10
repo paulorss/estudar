@@ -60,9 +60,10 @@ class SimpleAnalyzer:
             "NASCIMENTO": r"(?i)(?:nascid[oa](?:\s+em)?|data\s+de\s+nascimento)\s*:?\s*\d{2}[-/]\d{2}[-/]\d{4}"
         }
         
-        return [
-            PatternRecognizer(
-                supported_entity=entity_type,
+        recognizers = []
+        for entity_type, pattern in patterns.items():
+            recognizer = PatternRecognizer(
+                supported_language="pt",
                 patterns=[
                     Pattern(
                         name=f"{entity_type}_pattern",
@@ -71,15 +72,18 @@ class SimpleAnalyzer:
                     )
                 ]
             )
-            for entity_type, pattern in patterns.items()
-        ]
+            # Armazena o tipo de entidade como atributo
+            recognizer.entity_type = entity_type
+            recognizers.append(recognizer)
+            
+        return recognizers
     
     def analyze(self, text: str) -> List[RecognizerResult]:
         """Analisa texto em busca de padrões"""
         results = []
         for recognizer in self.recognizers:
-            # Cada recognizer analisa apenas sua própria entidade
-            results.extend(recognizer.analyze(text=text, entities=[recognizer.supported_entity]))
+            # Usa o entity_type armazenado em vez de supported_entity
+            results.extend(recognizer.analyze(text=text, entities=[recognizer.entity_type]))
         return results
 
 class Anonimizador:
@@ -160,7 +164,7 @@ class Anonimizador:
         df = pd.read_csv(pd.StringIO(conteudo))
         for coluna in df.columns:
             if df[coluna].dtype == 'object':
-                df[coluna] = df[coluna].apply(self.anonimizar_texto)
+                df[coluna] = df[coluna].apply(lambda x: self.anonimizar_texto(str(x)) if pd.notna(x) else x)
         return df
 
     def processar_json(self, conteudo: str) -> dict:
@@ -193,11 +197,12 @@ class Anonimizador:
                     packet = io.BytesIO()
                     c = canvas.Canvas(packet, pagesize=letter)
                     
+                    # Ajuste as coordenadas Y para começar do topo
                     y = 750
                     for linha in texto_anonimizado.split('\n'):
                         if linha.strip():
                             c.drawString(50, y, linha)
-                            y -= 15
+                            y -= 15  # Ajuste o espaçamento entre linhas conforme necessário
                     
                     c.save()
                     packet.seek(0)
@@ -221,8 +226,9 @@ class Anonimizador:
             doc = Document(doc_temp)
             doc_anonimizado = Document()
             
+            # Copiar estilos
             for style in doc.styles:
-                if style.type == 1:
+                if style.type == 1:  # Paragraph style
                     try:
                         doc_anonimizado.styles.add_style(
                             style.name, style.type,
@@ -230,13 +236,14 @@ class Anonimizador:
                         )
                     except:
                         pass
-            
+                        # Processar parágrafos
             for para in doc.paragraphs:
                 novo_para = doc_anonimizado.add_paragraph(
                     self.anonimizar_texto(para.text),
                     style=para.style.name
                 )
                 
+                # Copiar formatação de runs
                 for idx, run in enumerate(para.runs):
                     if idx < len(novo_para.runs):
                         novo_run = novo_para.runs[idx]
@@ -246,6 +253,7 @@ class Anonimizador:
                         if run.font.size:
                             novo_run.font.size = run.font.size
             
+            # Processar tabelas
             for tabela in doc.tables:
                 nova_tabela = doc_anonimizado.add_table(
                     rows=len(tabela.rows),
@@ -276,17 +284,39 @@ def main():
     - CPF (mascaramento parcial)
     - RG (mascaramento parcial)
     - CNH (mascaramento parcial)
-    - Cartões de crédito (mascaramento parcial)
+    - Título de Eleitor (mascaramento parcial)
+    - PIS (mascaramento parcial)
+    - Passaporte (mascaramento parcial)
     
     **Dados Pessoais:**
     - Nomes completos
     - Nome dos pais
     - Estado civil
+    - Profissão
+    
+    **Dados de Contato:**
     - E-mails (mascaramento)
     - Telefones (mascaramento)
-    - Endereços
-    - CEP
-    - Datas
+    - WhatsApp (mascaramento)
+    
+    **Dados Financeiros:**
+    - Cartões de crédito (mascaramento)
+    - Contas bancárias
+    - Informações de renda
+    
+    **Endereço:**
+    - Endereços completos
+    - CEP (mascaramento)
+    - Bairro
+    
+    **Dados Sensíveis:**
+    - Raça/Cor
+    - Religião
+    - Orientação Sexual
+    
+    **Datas:**
+    - Datas em geral
+    - Data de nascimento
     """)
     
     anonimizador = Anonimizador()
@@ -317,6 +347,7 @@ def main():
                     "anonimizado.csv",
                     "text/csv"
                 )
+                
             elif arquivo.name.endswith('.json'):
                 conteudo_texto = conteudo.decode('utf-8')
                 resultado = anonimizador.processar_json(conteudo_texto)
@@ -327,6 +358,7 @@ def main():
                     "anonimizado.json",
                     "application/json"
                 )
+                
             elif arquivo.name.endswith('.docx'):
                 docx_anonimizado = anonimizador.processar_docx(conteudo)
                 st.download_button(
@@ -335,14 +367,16 @@ def main():
                     "anonimizado.docx",
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
+                
             elif arquivo.name.endswith('.pdf'):
                 pdf_anonimizado = anonimizador.processar_pdf(conteudo)
                 st.download_button(
                     "Download PDF Anonimizado",
                     pdf_anonimizado,
                     "anonimizado.pdf",
-                "application/pdf"
+                    "application/pdf"
                 )
+                
             else:  # .txt
                 conteudo_texto = conteudo.decode('utf-8')
                 texto_anonimizado = anonimizador.anonimizar_texto(conteudo_texto)
