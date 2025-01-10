@@ -12,11 +12,16 @@ from presidio_analyzer import AnalyzerEngine, RecognizerRegistry, PatternRecogni
 from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
 
-# Initialize spaCy with blank model
 @st.cache_resource
-def create_nlp():
-    nlp = spacy.blank("pt")
-    return nlp
+def load_spacy_model():
+    """Carrega o modelo spaCy"""
+    try:
+        # Tenta carregar o modelo
+        nlp = spacy.load("pt_core_news_sm")
+        return nlp
+    except OSError as e:
+        st.error(f"Erro ao carregar modelo spaCy: {str(e)}")
+        return None
 
 class CustomAnalyzer:
     def __init__(self):
