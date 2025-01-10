@@ -7,33 +7,9 @@ from PyPDF2 import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 from docx import Document
-import spacy
-from presidio_analyzer import AnalyzerEngine, RecognizerRegistry, PatternRecognizer
+from presidio_analyzer import RecognizerRegistry, PatternRecognizer, AnalyzerEngine
 from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
-
-import streamlit as st
-import spacy
-import os
-import tempfile
-import subprocess
-
-@st.cache_resource
-def load_spacy_model():
-    """Carrega o modelo spaCy"""
-    try:
-        return spacy.load('pt_core_news_sm')
-    except Exception as e:
-        st.error(f"Erro ao carregar modelo spaCy: {str(e)}")
-        return None
-
-# Carrega o modelo
-nlp = load_spacy_model()
-
-if nlp:
-    st.success("Modelo spaCy carregado com sucesso!")
-else:
-    st.error("Não foi possível carregar o modelo spaCy")
 
 class CustomAnalyzer:
     def __init__(self):
@@ -42,7 +18,7 @@ class CustomAnalyzer:
         self.registry = RecognizerRegistry()
         
         # Add custom recognizers
-        self.add_custom_recognizers()
+        self.setup_recognizers()
         
         # Initialize the analyzer engine with custom registry
         self.analyzer = AnalyzerEngine(registry=self.registry)
@@ -50,44 +26,100 @@ class CustomAnalyzer:
         # Initialize the anonymizer
         self.anonymizer = AnonymizerEngine()
 
-    def add_custom_recognizers(self):
-        """Add custom recognizers for Brazilian documents and data"""
-        # CPF recognizer
-        cpf_pattern = PatternRecognizer(
-            supported_entity="CPF",
-            patterns=[{"pattern": r"\d{3}\.?\d{3}\.?\d{3}-?\d{2}", "score": 0.85}]
-        )
+    def setup_recognizers(self):
+        """Setup all custom recognizers for Brazilian documents and data"""
+        recognizers = [
+            # Documentos
+            PatternRecognizer(
+                supported_entity="CPF",
+                patterns=[{
+                    "pattern": r"\d{3}\.?\d{3}\.?\d{3}-?\d{2}",
+                    "score": 0.95
+                }]
+            ),
+            PatternRecognizer(
+                supported_entity="RG",
+                patterns=[{
+                    "pattern": r"\d{2}\.?\d{3}\.?\d{3}[-]?\d{1}|\d{2}\.?\d{3}\.?\d{3}",
+                    "score": 0.95
+                }]
+            ),
+            PatternRecognizer(
+                supported_entity="CNH",
+                patterns=[{
+                    "pattern": r"\d{11}",
+                    "score": 0.5
+                }]
+            ),
+            # Contato
+            PatternRecognizer(
+                supported_entity="EMAIL",
+                patterns=[{
+                    "pattern": r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
+                    "score": 0.95
+                }]
+            ),
+            PatternRecognizer(
+                supported_entity="PHONE",
+                patterns=[{
+                    "pattern": r"(?:\+55\s?)?(?:\(?\d{2}\)?[-\s]?)?\d{4,5}[-\s]?\d{4}",
+                    "score": 0.95
+                }]
+            ),
+            # Dados Bancários
+            PatternRecognizer(
+                supported_entity="CREDIT_CARD",
+                patterns=[{
+                    "pattern": r"\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}",
+                    "score": 0.95
+                }]
+            ),
+            PatternRecognizer(
+                supported_entity="BANK_ACCOUNT",
+                patterns=[{
+                    "pattern": r"(?:ag[êe]ncia|conta)\s*:?\s*\d{1,4}[-.]?\d{1,10}",
+                    "score": 0.85
+                }]
+            ),
+            # Endereço
+            PatternRecognizer(
+                supported_entity="CEP",
+                patterns=[{
+                    "pattern": r"\d{5}[-]?\d{3}",
+                    "score": 0.95
+                }]
+            ),
+            PatternRecognizer(
+                supported_entity="ADDRESS",
+                patterns=[{
+                    "pattern": r"(?:Rua|Av|Avenida|Alameda|Al|Praça|R|Travessa|Rod|Rodovia)\s+(?:[A-ZÀ-Ú][a-zà-ú]+\s*)+,?\s*\d+",
+                    "score": 0.85
+                }]
+            ),
+            # Nomes
+            PatternRecognizer(
+                supported_entity="PERSON",
+                patterns=[{
+                    "pattern": r"(?i)([A-ZÀ-Ú][a-zà-ú]+(?:\s+(?:dos?|das?|de|e|[A-ZÀ-Ú][a-zà-ú]+))+)",
+                    "score": 0.7
+                }]
+            )
+        ]
         
-        # RG recognizer
-        rg_pattern = PatternRecognizer(
-            supported_entity="RG",
-            patterns=[{"pattern": r"\d{2}\.?\d{3}\.?\d{3}[-]?\d{1}|\d{2}\.?\d{3}\.?\d{3}", "score": 0.85}]
-        )
-        
-        # Email recognizer
-        email_pattern = PatternRecognizer(
-            supported_entity="EMAIL_ADDRESS",
-            patterns=[{"pattern": r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", "score": 0.85}]
-        )
-        
-        # Phone recognizer
-        phone_pattern = PatternRecognizer(
-            supported_entity="PHONE_NUMBER",
-            patterns=[{"pattern": r"(?:\+55\s?)?(?:\(?\d{2}\)?[-\s]?)?\d{4,5}[-\s]?\d{4}", "score": 0.85}]
-        )
-        
-        # Add recognizers to registry
-        self.registry.add_recognizer(cpf_pattern)
-        self.registry.add_recognizer(rg_pattern)
-        self.registry.add_recognizer(email_pattern)
-        self.registry.add_recognizer(phone_pattern)
+        # Add all recognizers to registry
+        for recognizer in recognizers:
+            self.registry.add_recognizer(recognizer)
 
     def analyze_text(self, text: str) -> List[Dict]:
         """Analyze text using custom recognizers"""
         return self.analyzer.analyze(
             text=text,
             language="pt",
-            entities=["CPF", "RG", "EMAIL_ADDRESS", "PHONE_NUMBER"]
+            entities=[
+                "CPF", "RG", "CNH", "EMAIL", "PHONE", 
+                "CREDIT_CARD", "BANK_ACCOUNT", "CEP",
+                "ADDRESS", "PERSON"
+            ]
         )
 
     def anonymize_text(self, text: str) -> str:
@@ -99,12 +131,18 @@ class CustomAnalyzer:
             # Analyze text
             analyzer_results = self.analyze_text(text)
             
-            # Define operators
+            # Define operators for each entity type
             operators = {
                 "CPF": OperatorConfig("mask", {"chars_to_mask": 6, "masking_char": "*"}),
                 "RG": OperatorConfig("mask", {"chars_to_mask": 4, "masking_char": "*"}),
-                "EMAIL_ADDRESS": OperatorConfig("mask", {"chars_to_mask": -4, "masking_char": "*"}),
-                "PHONE_NUMBER": OperatorConfig("mask", {"chars_to_mask": 4, "masking_char": "*"})
+                "CNH": OperatorConfig("mask", {"chars_to_mask": 6, "masking_char": "*"}),
+                "EMAIL": OperatorConfig("mask", {"chars_to_mask": -4, "masking_char": "*"}),
+                "PHONE": OperatorConfig("mask", {"chars_to_mask": 4, "masking_char": "*"}),
+                "CREDIT_CARD": OperatorConfig("mask", {"chars_to_mask": 12, "masking_char": "*"}),
+                "BANK_ACCOUNT": OperatorConfig("mask", {"chars_to_mask": -4, "masking_char": "*"}),
+                "CEP": OperatorConfig("mask", {"chars_to_mask": 3, "masking_char": "*"}),
+                "ADDRESS": OperatorConfig("replace", {"new_value": "[ENDEREÇO PROTEGIDO]"}),
+                "PERSON": OperatorConfig("replace", {"new_value": "[NOME PROTEGIDO]"})
             }
             
             # Anonymize text
@@ -250,12 +288,24 @@ def main():
     **Documentos Brasileiros:**
     - CPF (mascaramento parcial)
     - RG (mascaramento parcial)
+    - CNH (mascaramento parcial)
     
     **Dados de Contato:**
     - E-mails (mascaramento)
     - Telefones (mascaramento)
     
-    O sistema usa padrões customizados para detectar e anonimizar dados sensíveis em português.
+    **Dados Financeiros:**
+    - Cartões de Crédito (mascaramento)
+    - Contas Bancárias (mascaramento)
+    
+    **Localização:**
+    - CEP (mascaramento)
+    - Endereços (substituição)
+    
+    **Dados Pessoais:**
+    - Nomes (substituição)
+    
+    O sistema usa reconhecimento de padrões para detectar e anonimizar dados sensíveis em português.
     """)
     
     analyzer = CustomAnalyzer()
@@ -330,6 +380,19 @@ def main():
             
         except Exception as e:
             st.error(f"Erro ao processar arquivo: {str(e)}")
+            
+    st.markdown("""
+    ### Como usar:
+    1. Digite um texto diretamente na caixa de texto ou
+    2. Faça upload de um arquivo suportado (.csv, .txt, .json, .pdf, .docx)
+    3. Clique no botão correspondente para anonimizar
+    4. Faça o download do arquivo anonimizado
+    
+    ### Observações:
+    - Os dados são processados localmente em seu navegador
+    - Nenhuma informação é armazenada ou transmitida
+    - Alguns formatos complexos de PDF podem não ser processados corretamente
+    """)
 
 if __name__ == "__main__":
     main()
