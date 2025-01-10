@@ -2,6 +2,10 @@ import streamlit as st
 import pandas as pd
 import re
 import json
+import io
+from PyPDF2 import PdfReader, PdfWriter
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
 from typing import Dict, List, Tuple
 
 class Anonimizador:
@@ -41,6 +45,36 @@ class Anonimizador:
             if df[coluna].dtype == 'object':
                 df[coluna] = df[coluna].apply(self.anonimizar_texto)
         return df
+
+    def processar_pdf(self, pdf_bytes: bytes) -> bytes:
+        """Processa arquivo PDF e retorna versão anonimizada"""
+        # Criar PDF reader e writer
+        pdf_reader = PdfReader(io.BytesIO(pdf_bytes))
+        pdf_writer = PdfWriter()
+        
+        # Processar cada página
+        for page in pdf_reader.pages:
+            # Extrair texto da página
+            texto = page.extract_text()
+            
+            # Anonimizar o texto
+            texto_anonimizado = self.anonimizar_texto(texto)
+            
+            # Criar nova página com texto anonimizado
+            packet = io.BytesIO()
+            can = canvas.Canvas(packet, pagesize=letter)
+            can.drawString(10, 500, texto_anonimizado)
+            can.save()
+            
+            # Mover para o início do BytesIO
+            packet.seek(0)
+            nova_pagina = PdfReader(packet).pages[0]
+            pdf_writer.add_page(nova_pagina)
+        
+        # Salvar PDF anonimizado
+        output = io.BytesIO()
+        pdf_writer.write(output)
+        return output.getvalue()
 
     def processar_json(self, conteudo: str) -> dict:
         dados = json.loads(conteudo)
@@ -98,7 +132,7 @@ def main():
     
     # Upload de arquivo
     st.header("Anonimização de Arquivo")
-    arquivo = st.file_uploader("Escolha um arquivo (.csv, .txt, .json)", type=['csv', 'txt', 'json'])
+    arquivo = st.file_uploader("Escolha um arquivo (.csv, .txt, .json, .pdf)", type=['csv', 'txt', 'json', 'pdf'])
     
     if arquivo is not None:
         try:
@@ -121,6 +155,14 @@ def main():
                     json_str,
                     "anonimizado.json",
                     "application/json"
+                )
+            elif arquivo.name.endswith('.pdf'):
+                pdf_anonimizado = anonimizador.processar_pdf(arquivo.getvalue())
+                st.download_button(
+                    "Download PDF Anonimizado",
+                    pdf_anonimizado,
+                    "anonimizado.pdf",
+                    "application/pdf"
                 )
             else:  # .txt
                 texto_anonimizado = anonimizador.anonimizar_texto(conteudo)
