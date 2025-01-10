@@ -88,42 +88,42 @@ class Anonimizador:
         """Retorna configurações de anonimização para cada tipo de dado"""
         return {
             # Documentos - Mascaramento parcial
-            "CPF": {"type": "mask", "chars_to_mask": 9, "masking_char": "*", "from_end": False},
-            "RG": {"type": "mask", "chars_to_mask": 7, "masking_char": "*", "from_end": False},
-            "CNH": {"type": "mask", "chars_to_mask": 8, "masking_char": "*", "from_end": False},
-            "TITULO_ELEITOR": {"type": "mask", "chars_to_mask": 8, "masking_char": "*", "from_end": False},
-            "PIS": {"type": "mask", "chars_to_mask": 9, "masking_char": "*", "from_end": False},
-            "PASSAPORTE": {"type": "mask", "chars_to_mask": 6, "masking_char": "*", "from_end": False},
+            "CPF": {"type": "mask", "chars_to_mask": 7, "masking_char": "*", "from_end": True},
+            "RG": {"type": "mask", "chars_to_mask": 5, "masking_char": "*", "from_end": True},
+            "CNH": {"type": "mask", "chars_to_mask": 6, "masking_char": "*", "from_end": True},
+            "TITULO_ELEITOR": {"type": "mask", "chars_to_mask": 6, "masking_char": "*", "from_end": True},
+            "PIS": {"type": "mask", "chars_to_mask": 7, "masking_char": "*", "from_end": True},
+            "PASSAPORTE": {"type": "mask", "chars_to_mask": 4, "masking_char": "*", "from_end": True},
             
-            # Dados Pessoais - Substituição total
-            "NOME_COMPLETO": {"type": "replace", "new_value": "[NOME PROTEGIDO]"},
-            "NOME_PAIS": {"type": "replace", "new_value": "[FILIAÇÃO PROTEGIDA]"},
-            "ESTADO_CIVIL": {"type": "replace", "new_value": "[ESTADO CIVIL PROTEGIDO]"},
-            "PROFISSAO": {"type": "replace", "new_value": "[PROFISSÃO PROTEGIDA]"},
+            # Dados Pessoais - Mascaramento parcial
+            "NOME_COMPLETO": {"type": "mask", "chars_to_mask": 4, "masking_char": "*", "from_end": True},
+            "NOME_PAIS": {"type": "mask", "chars_to_mask": 4, "masking_char": "*", "from_end": True},
+            "ESTADO_CIVIL": {"type": "mask", "chars_to_mask": 4, "masking_char": "*", "from_end": True},
+            "PROFISSAO": {"type": "mask", "chars_to_mask": 4, "masking_char": "*", "from_end": True},
             
             # Dados de Contato - Mascaramento parcial
-            "EMAIL": {"type": "mask", "chars_to_mask": -1, "masking_char": "*", "from_end": False},
-            "TELEFONE": {"type": "mask", "chars_to_mask": 8, "masking_char": "*", "from_end": False},
-            "WHATSAPP": {"type": "mask", "chars_to_mask": 8, "masking_char": "*", "from_end": False},
+            "EMAIL": {"type": "mask", "chars_to_mask": -4, "masking_char": "*", "from_end": True},
+            "TELEFONE": {"type": "mask", "chars_to_mask": 4, "masking_char": "*", "from_end": True},
+            "WHATSAPP": {"type": "mask", "chars_to_mask": 4, "masking_char": "*", "from_end": True},
             
-            # Dados Financeiros - Mascaramento total
-            "CARTAO_CREDITO": {"type": "mask", "chars_to_mask": 12, "masking_char": "*", "from_end": False},
-            "CONTA_BANCARIA": {"type": "replace", "new_value": "[DADOS BANCÁRIOS PROTEGIDOS]"},
-            "RENDA": {"type": "replace", "new_value": "[INFORMAÇÃO FINANCEIRA PROTEGIDA]"},
+            # Dados Financeiros - Mascaramento parcial
+            "CARTAO_CREDITO": {"type": "mask", "chars_to_mask": 4, "masking_char": "*", "from_end": True},
+            "CONTA_BANCARIA": {"type": "mask", "chars_to_mask": -4, "masking_char": "*", "from_end": True},
+            "RENDA": {"type": "mask", "chars_to_mask": -1, "masking_char": "*", "from_end": True},
             
-            # Endereço - Substituição
-            "ENDERECO": {"type": "replace", "new_value": "[ENDEREÇO PROTEGIDO]"},
-            "CEP": {"type": "mask", "chars_to_mask": 5, "masking_char": "*", "from_end": False},
-            "BAIRRO": {"type": "replace", "new_value": "[BAIRRO PROTEGIDO]"},
+            # Endereço - Mascaramento parcial
+            "ENDERECO": {"type": "mask", "chars_to_mask": -4, "masking_char": "*", "from_end": True},
+            "CEP": {"type": "mask", "chars_to_mask": 3, "masking_char": "*", "from_end": True},
+            "BAIRRO": {"type": "mask", "chars_to_mask": -4, "masking_char": "*", "from_end": True},
             
-            # Dados Sensíveis - Substituição total
-            "RACA": {"type": "replace", "new_value": "[DADO SENSÍVEL - RAÇA]"},
-            "RELIGIAO": {"type": "replace", "new_value": "[DADO SENSÍVEL - RELIGIÃO]"},
-            "ORIENTACAO_SEXUAL": {"type": "replace", "new_value": "[DADO SENSÍVEL - ORIENTAÇÃO SEXUAL]"},
+            # Dados Sensíveis - Mascaramento parcial
+            "RACA": {"type": "mask", "chars_to_mask": -4, "masking_char": "*", "from_end": True},
+            "RELIGIAO": {"type": "mask", "chars_to_mask": -4, "masking_char": "*", "from_end": True},
+            "ORIENTACAO_SEXUAL": {"type": "mask", "chars_to_mask": -4, "masking_char": "*", "from_end": True},
             
-            # Datas - Substituição
-            "DATA": {"type": "replace", "new_value": "[DATA PROTEGIDA]"},
-            "NASCIMENTO": {"type": "replace", "new_value": "[DATA DE NASCIMENTO PROTEGIDA]"},
+            # Datas - Mascaramento parcial
+            "DATA": {"type": "mask", "chars_to_mask": -3, "masking_char": "*", "from_end": True},
+            "NASCIMENTO": {"type": "mask", "chars_to_mask": -3, "masking_char": "*", "from_end": True},
             
             # Padrão para outros tipos de dados
             "DEFAULT": {"type": "replace", "new_value": "[DADO PROTEGIDO]"}
