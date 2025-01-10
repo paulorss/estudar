@@ -12,16 +12,40 @@ from presidio_analyzer import AnalyzerEngine, RecognizerRegistry, PatternRecogni
 from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
 
+import streamlit as st
+import spacy
+import os
+import tempfile
+import subprocess
+
 @st.cache_resource
 def load_spacy_model():
-    """Carrega o modelo spaCy"""
-    try:
-        # Tenta carregar o modelo
-        nlp = spacy.load("pt_core_news_sm")
-        return nlp
-    except OSError as e:
-        st.error(f"Erro ao carregar modelo spaCy: {str(e)}")
-        return None
+    """Load spaCy model using a temporary directory"""
+    # Create a temporary directory
+    with tempfile.TemporaryDirectory() as temp_dir:
+        try:
+            # Set the environment variable to install packages in the temp directory
+            os.environ["SPACY_MODEL_PATH"] = temp_dir
+            
+            # Install the model in the temporary directory
+            subprocess.run([
+                "python", "-m", "pip", "install", 
+                "--target", temp_dir,
+                "https://github.com/explosion/spacy-models/releases/download/pt_core_news_sm-3.5.0/pt_core_news_sm-3.5.0-py3-none-any.whl"
+            ], check=True)
+            
+            # Add the temp directory to Python path
+            import sys
+            sys.path.insert(0, temp_dir)
+            
+            # Load the model
+            nlp = spacy.load("pt_core_news_sm")
+            return nlp
+            
+        except Exception as e:
+            st.error(f"Error loading spaCy model: {str(e)}")
+            return None
+
 
 class CustomAnalyzer:
     def __init__(self):
