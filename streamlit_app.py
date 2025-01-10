@@ -17,11 +17,19 @@ import os
 # Download spaCy model during first run
 @st.cache_resource
 def load_spacy_model():
-    try:
-        nlp = spacy.load("pt_core_news_sm")
-    except OSError:
-        spacy.cli.download("pt_core_news_sm")
-        nlp = spacy.load("pt_core_news_sm")
+    nlp = spacy.blank("pt")
+    
+    # Add custom patterns for Brazilian Portuguese
+    patterns = [
+        {"label": "PERSON", "pattern": [{"LOWER": {"REGEX": "^[A-ZÀ-Ú][a-zà-ú]+(?:\s+(?:dos?|das?|de|e|[A-ZÀ-Ú][a-zà-ú]+))+$"}}]},
+        {"label": "EMAIL", "pattern": [{"LOWER": {"REGEX": "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"}}]},
+        {"label": "PHONE", "pattern": [{"LOWER": {"REGEX": "(?:\+55\s?)?(?:\(?\d{2}\)?[-\s]?)?\d{4,5}[-\s]?\d{4}"}}]},
+    ]
+    
+    # Add the patterns to the pipeline
+    ruler = nlp.add_pipe("entity_ruler")
+    ruler.add_patterns(patterns)
+    
     return nlp
 
 class PresidioAnalyzer:
@@ -30,7 +38,13 @@ class PresidioAnalyzer:
         self.nlp = load_spacy_model()
         
         # Configure NLP engine with Portuguese model
-        provider = NlpEngineProvider(nlp_engine=self.nlp)
+        # Initialize the NLP engine provider with the blank model
+        configuration = {
+            "nlp_engine_name": "spacy",
+            "models": [{"lang_code": "pt", "model_name": "blank"}]
+        }
+        
+        provider = NlpEngineProvider(nlp_configuration=configuration)
         
         # Initialize analyzer with Portuguese support
         self.analyzer = AnalyzerEngine(
