@@ -9,3 +9,5 @@ python-docx==1.1.0
 protobuf==4.25.3
 typing-extensions==4.9.0
 pydantic==1.10.14
+# Use o modelo pequeno do spaCy
+https://huggingface.co/spacy/pt_core_news_sm/resolve/v3.5.0/pt_core_news_sm-3.5.0-py3-none-any.whl
