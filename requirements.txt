@@ -1,5 +1,16 @@
+# Interface e manipulação de dados
 streamlit
 pandas
+
+# Processamento de documentos
+python-docx
 PyPDF2
 reportlab
-python-docx
+
+# Presidio e suas dependências
+presidio-analyzer
+presidio-anonymizer
+
+# NLP
+spacy
+pt-core-news-md @ https://github.com/explosion/spacy-models/releases/download/pt_core_news_md-3.5.0/pt_core_news_md-3.5.0-py3-none-any.whl
