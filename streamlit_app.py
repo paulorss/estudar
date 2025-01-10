@@ -18,10 +18,10 @@ import os
 @st.cache_resource
 def load_spacy_model():
     try:
-        nlp = spacy.load("pt_core_news_lg")
+        nlp = spacy.load("pt_core_news_sm")
     except OSError:
-        os.system("python -m spacy download pt_core_news_lg")
-        nlp = spacy.load("pt_core_news_lg")
+        spacy.cli.download("pt_core_news_sm")
+        nlp = spacy.load("pt_core_news_sm")
     return nlp
 
 class PresidioAnalyzer:
