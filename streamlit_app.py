@@ -8,76 +8,70 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 from docx import Document
 import spacy
-from presidio_analyzer import AnalyzerEngine
-from presidio_analyzer.nlp_engine import NlpEngineProvider
+from presidio_analyzer import AnalyzerEngine, RecognizerRegistry, PatternRecognizer
 from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
-import os
 
-# Download spaCy model during first run
+# Initialize spaCy with blank model
 @st.cache_resource
-def load_spacy_model():
+def create_nlp():
     nlp = spacy.blank("pt")
-    
-    # Add custom patterns for Brazilian Portuguese
-    patterns = [
-        {"label": "PERSON", "pattern": [{"LOWER": {"REGEX": "^[A-ZÀ-Ú][a-zà-ú]+(?:\s+(?:dos?|das?|de|e|[A-ZÀ-Ú][a-zà-ú]+))+$"}}]},
-        {"label": "EMAIL", "pattern": [{"LOWER": {"REGEX": "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"}}]},
-        {"label": "PHONE", "pattern": [{"LOWER": {"REGEX": "(?:\+55\s?)?(?:\(?\d{2}\)?[-\s]?)?\d{4,5}[-\s]?\d{4}"}}]},
-    ]
-    
-    # Add the patterns to the pipeline
-    ruler = nlp.add_pipe("entity_ruler")
-    ruler.add_patterns(patterns)
-    
     return nlp
 
-class PresidioAnalyzer:
+class CustomAnalyzer:
     def __init__(self):
-        """Initialize Presidio analyzer with Portuguese support"""
-        self.nlp = load_spacy_model()
+        """Initialize the analyzer with custom recognizers"""
+        # Initialize the recognizer registry
+        self.registry = RecognizerRegistry()
         
-        # Configure NLP engine with Portuguese model
-        # Initialize the NLP engine provider with the blank model
-        configuration = {
-            "nlp_engine_name": "spacy",
-            "models": [{"lang_code": "pt", "model_name": "blank"}]
-        }
+        # Add custom recognizers
+        self.add_custom_recognizers()
         
-        provider = NlpEngineProvider(nlp_configuration=configuration)
+        # Initialize the analyzer engine with custom registry
+        self.analyzer = AnalyzerEngine(registry=self.registry)
         
-        # Initialize analyzer with Portuguese support
-        self.analyzer = AnalyzerEngine(
-            nlp_engine=provider,
-            supported_languages=["pt"]
+        # Initialize the anonymizer
+        self.anonymizer = AnonymizerEngine()
+
+    def add_custom_recognizers(self):
+        """Add custom recognizers for Brazilian documents and data"""
+        # CPF recognizer
+        cpf_pattern = PatternRecognizer(
+            supported_entity="CPF",
+            patterns=[{"pattern": r"\d{3}\.?\d{3}\.?\d{3}-?\d{2}", "score": 0.85}]
         )
         
-        # Initialize anonymizer
-        self.anonymizer = AnonymizerEngine()
+        # RG recognizer
+        rg_pattern = PatternRecognizer(
+            supported_entity="RG",
+            patterns=[{"pattern": r"\d{2}\.?\d{3}\.?\d{3}[-]?\d{1}|\d{2}\.?\d{3}\.?\d{3}", "score": 0.85}]
+        )
         
-        # Configure custom recognizers for Brazilian documents
-        self.custom_entities = {
-            "CPF": r"\d{3}\.?\d{3}\.?\d{3}-?\d{2}",
-            "RG": r"\d{2}\.?\d{3}\.?\d{3}[-]?\d{1}|\d{2}\.?\d{3}\.?\d{3}",
-            "CNH": r"\d{11}",
-            "TITULO_ELEITOR": r"\d{4}\s?\d{4}\s?\d{4}",
-            "PIS": r"\d{3}\.?\d{5}\.?\d{2}[-]?\d{1}",
-        }
+        # Email recognizer
+        email_pattern = PatternRecognizer(
+            supported_entity="EMAIL_ADDRESS",
+            patterns=[{"pattern": r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", "score": 0.85}]
+        )
+        
+        # Phone recognizer
+        phone_pattern = PatternRecognizer(
+            supported_entity="PHONE_NUMBER",
+            patterns=[{"pattern": r"(?:\+55\s?)?(?:\(?\d{2}\)?[-\s]?)?\d{4,5}[-\s]?\d{4}", "score": 0.85}]
+        )
+        
+        # Add recognizers to registry
+        self.registry.add_recognizer(cpf_pattern)
+        self.registry.add_recognizer(rg_pattern)
+        self.registry.add_recognizer(email_pattern)
+        self.registry.add_recognizer(phone_pattern)
 
     def analyze_text(self, text: str) -> List[Dict]:
-        """Analyze text using Presidio and custom recognizers"""
-        # Get Presidio analysis results
-        analyzer_results = self.analyzer.analyze(
+        """Analyze text using custom recognizers"""
+        return self.analyzer.analyze(
             text=text,
             language="pt",
-            entities=[
-                "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", 
-                "CREDIT_CARD", "LOCATION", "DATE_TIME",
-                "NRP", "MEDICAL_LICENSE", "URL", "TITLE"
-            ]
+            entities=["CPF", "RG", "EMAIL_ADDRESS", "PHONE_NUMBER"]
         )
-        
-        return analyzer_results
 
     def anonymize_text(self, text: str) -> str:
         """Anonymize text using Presidio"""
@@ -88,18 +82,12 @@ class PresidioAnalyzer:
             # Analyze text
             analyzer_results = self.analyze_text(text)
             
-            # Define anonymization operators
+            # Define operators
             operators = {
-                "PERSON": OperatorConfig("mask", {"chars_to_mask": 4, "masking_char": "*"}),
+                "CPF": OperatorConfig("mask", {"chars_to_mask": 6, "masking_char": "*"}),
+                "RG": OperatorConfig("mask", {"chars_to_mask": 4, "masking_char": "*"}),
                 "EMAIL_ADDRESS": OperatorConfig("mask", {"chars_to_mask": -4, "masking_char": "*"}),
-                "PHONE_NUMBER": OperatorConfig("mask", {"chars_to_mask": 4, "masking_char": "*"}),
-                "CREDIT_CARD": OperatorConfig("mask", {"chars_to_mask": -4, "masking_char": "*"}),
-                "LOCATION": OperatorConfig("replace", {"new_value": "[LOCALIZAÇÃO]"}),
-                "DATE_TIME": OperatorConfig("mask", {"chars_to_mask": 2, "masking_char": "*"}),
-                "NRP": OperatorConfig("mask", {"chars_to_mask": 4, "masking_char": "*"}),
-                "MEDICAL_LICENSE": OperatorConfig("mask", {"chars_to_mask": 4, "masking_char": "*"}),
-                "URL": OperatorConfig("mask", {"chars_to_mask": -4, "masking_char": "*"}),
-                "TITLE": OperatorConfig("replace", {"new_value": "[TÍTULO]"})
+                "PHONE_NUMBER": OperatorConfig("mask", {"chars_to_mask": 4, "masking_char": "*"})
             }
             
             # Anonymize text
@@ -237,25 +225,23 @@ class PresidioAnalyzer:
             return docx_bytes
 
 def main():
-    st.title("Anonimizador de Dados - LGPD (Presidio)")
+    st.title("Anonimizador de Dados - LGPD")
     
     st.markdown("""
     ### Dados detectados e anonimizados:
     
-    **Usando Microsoft Presidio e spaCy em Português:**
-    - Nomes de pessoas
-    - Endereços de e-mail
-    - Números de telefone
-    - Cartões de crédito
-    - Localizações
-    - Datas e horários
-    - URLs
-    - Documentos brasileiros (CPF, RG, CNH, etc.)
+    **Documentos Brasileiros:**
+    - CPF (mascaramento parcial)
+    - RG (mascaramento parcial)
     
-    O sistema usa técnicas avançadas de processamento de linguagem natural para detectar e anonimizar dados sensíveis.
+    **Dados de Contato:**
+    - E-mails (mascaramento)
+    - Telefones (mascaramento)
+    
+    O sistema usa padrões customizados para detectar e anonimizar dados sensíveis em português.
     """)
     
-    analyzer = PresidioAnalyzer()
+    analyzer = CustomAnalyzer()
     
     st.header("Anonimização de Texto")
     text_input = st.text_area("Digite o texto a ser anonimizado:", height=150)
