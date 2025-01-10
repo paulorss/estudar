@@ -2,9 +2,10 @@ import streamlit as st
 import pandas as pd
 import json
 import io
+import re
 from typing import List, Dict, Any, Optional
-from presidio_analyzer import PatternRecognizer, Pattern, RecognizerResult
 from presidio_anonymizer import AnonymizerEngine
+from presidio_analyzer import Pattern, PatternRecognizer, RecognizerResult
 from presidio_anonymizer.entities import OperatorConfig
 from PyPDF2 import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
@@ -16,11 +17,12 @@ class SimpleAnalyzer:
     """Analisador simplificado baseado em padrões"""
     
     def __init__(self):
+        self.patterns = self._get_patterns()
         self.recognizers = self._create_recognizers()
     
-    def _create_recognizers(self) -> List[PatternRecognizer]:
-        """Cria reconhecedores de padrões customizados para LGPD"""
-        patterns = {
+    def _get_patterns(self) -> Dict[str, str]:
+        """Define os padrões de regex para cada tipo de dado"""
+        return {
             # Documentos
             "CPF": r"\d{3}\.?\d{3}\.?\d{3}-?\d{2}",
             "RG": r"\d{2}\.?\d{3}\.?\d{3}[-]?\d{1}|\d{2}\.?\d{3}\.?\d{3}",
@@ -59,31 +61,32 @@ class SimpleAnalyzer:
             "DATA": r"\d{2}[-/]\d{2}[-/]\d{4}|\d{2}\s+(?:de\s+)?(?:janeiro|fevereiro|março|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\s+(?:de\s+)?\d{4}",
             "NASCIMENTO": r"(?i)(?:nascid[oa](?:\s+em)?|data\s+de\s+nascimento)\s*:?\s*\d{2}[-/]\d{2}[-/]\d{4}"
         }
-        
+    
+    def _create_recognizers(self) -> List[PatternRecognizer]:
+        """Cria reconhecedores de padrões"""
         recognizers = []
-        for entity_type, pattern in patterns.items():
-            recognizer = PatternRecognizer(
-                supported_language="pt",
-                patterns=[
-                    Pattern(
-                        name=f"{entity_type}_pattern",
-                        regex=pattern,
-                        score=0.85
-                    )
-                ]
+        for entity_type, regex in self.patterns.items():
+            pattern = Pattern(
+                name=f"{entity_type}_pattern",
+                regex=regex,
+                score=0.85
             )
-            # Armazena o tipo de entidade como atributo
-            recognizer.entity_type = entity_type
+            recognizer = PatternRecognizer(
+                name=f"{entity_type}_recognizer",
+                supported_entity=entity_type,
+                patterns=[pattern]
+            )
             recognizers.append(recognizer)
-            
         return recognizers
     
     def analyze(self, text: str) -> List[RecognizerResult]:
         """Analisa texto em busca de padrões"""
         results = []
         for recognizer in self.recognizers:
-            # Usa o entity_type armazenado em vez de supported_entity
-            results.extend(recognizer.analyze(text=text, entities=[recognizer.entity_type]))
+            try:
+                results.extend(recognizer.analyze(text, entities=[recognizer.supported_entity]))
+            except Exception as e:
+                st.warning(f"Erro ao processar {recognizer.supported_entity}: {str(e)}")
         return results
 
 class Anonimizador:
@@ -137,8 +140,8 @@ class Anonimizador:
             # Padrão para outros tipos de dados
             "DEFAULT": OperatorConfig("replace", {"new_value": "[DADO PROTEGIDO]"})
         }
-    
-    def anonimizar_texto(self, texto: str) -> str:
+
+def anonimizar_texto(self, texto: str) -> str:
         """Anonimiza texto"""
         if not isinstance(texto, str) or not texto.strip():
             return texto
@@ -147,6 +150,9 @@ class Anonimizador:
             # Analisar texto
             resultados = self.analyzer.analyze(texto)
             
+            if not resultados:  # Se não encontrou dados sensíveis
+                return texto
+                
             # Anonimizar texto
             texto_anonimizado = self.anonymizer.anonymize(
                 text=texto,
@@ -161,27 +167,35 @@ class Anonimizador:
 
     def processar_csv(self, conteudo: str) -> pd.DataFrame:
         """Processa arquivo CSV"""
-        df = pd.read_csv(pd.StringIO(conteudo))
-        for coluna in df.columns:
-            if df[coluna].dtype == 'object':
-                df[coluna] = df[coluna].apply(lambda x: self.anonimizar_texto(str(x)) if pd.notna(x) else x)
-        return df
+        try:
+            df = pd.read_csv(pd.StringIO(conteudo))
+            for coluna in df.columns:
+                if df[coluna].dtype == 'object':
+                    df[coluna] = df[coluna].apply(lambda x: self.anonimizar_texto(str(x)) if pd.notna(x) else x)
+            return df
+        except Exception as e:
+            st.error(f"Erro ao processar CSV: {str(e)}")
+            return pd.DataFrame()
 
     def processar_json(self, conteudo: str) -> dict:
         """Processa arquivo JSON"""
-        dados = json.loads(conteudo)
-        
-        def anonimizar_dict(d: Any) -> Any:
-            if isinstance(d, dict):
-                return {k: anonimizar_dict(v) for k, v in d.items()}
-            elif isinstance(d, list):
-                return [anonimizar_dict(v) for v in d]
-            elif isinstance(d, str):
-                return self.anonimizar_texto(d)
-            else:
-                return d
-                
-        return anonimizar_dict(dados)
+        try:
+            dados = json.loads(conteudo)
+            
+            def anonimizar_dict(d: Any) -> Any:
+                if isinstance(d, dict):
+                    return {k: anonimizar_dict(v) for k, v in d.items()}
+                elif isinstance(d, list):
+                    return [anonimizar_dict(v) for v in d]
+                elif isinstance(d, str):
+                    return self.anonimizar_texto(d)
+                else:
+                    return d
+                    
+            return anonimizar_dict(dados)
+        except Exception as e:
+            st.error(f"Erro ao processar JSON: {str(e)}")
+            return {}
 
     def processar_pdf(self, pdf_bytes: bytes) -> bytes:
         """Processa arquivo PDF"""
@@ -194,19 +208,20 @@ class Anonimizador:
                 if texto:
                     texto_anonimizado = self.anonimizar_texto(texto)
                     
+                    # Criar nova página com texto anonimizado
                     packet = io.BytesIO()
                     c = canvas.Canvas(packet, pagesize=letter)
                     
-                    # Ajuste as coordenadas Y para começar do topo
-                    y = 750
+                    y = 750  # Posição inicial Y
                     for linha in texto_anonimizado.split('\n'):
                         if linha.strip():
                             c.drawString(50, y, linha)
-                            y -= 15  # Ajuste o espaçamento entre linhas conforme necessário
+                            y -= 15  # Espaçamento entre linhas
                     
                     c.save()
                     packet.seek(0)
                     nova_pagina = PdfReader(packet).pages[0]
+                    pdf
                     pdf_writer.add_page(nova_pagina)
                 else:
                     pdf_writer.add_page(pagina)
@@ -222,6 +237,7 @@ class Anonimizador:
     def processar_docx(self, docx_bytes: bytes) -> bytes:
         """Processa arquivo DOCX"""
         try:
+            # Abrir documento original
             doc_temp = io.BytesIO(docx_bytes)
             doc = Document(doc_temp)
             doc_anonimizado = Document()
@@ -236,14 +252,15 @@ class Anonimizador:
                         )
                     except:
                         pass
-                        # Processar parágrafos
+            
+            # Processar parágrafos
             for para in doc.paragraphs:
                 novo_para = doc_anonimizado.add_paragraph(
                     self.anonimizar_texto(para.text),
-                    style=para.style.name
+                    style=para.style.name if para.style else None
                 )
                 
-                # Copiar formatação de runs
+                # Copiar formatação
                 for idx, run in enumerate(para.runs):
                     if idx < len(novo_para.runs):
                         novo_run = novo_para.runs[idx]
@@ -259,7 +276,9 @@ class Anonimizador:
                     rows=len(tabela.rows),
                     cols=len(tabela.columns)
                 )
-                nova_tabela.style = tabela.style
+                
+                if tabela.style:
+                    nova_tabela.style = tabela.style
                 
                 for i, linha in enumerate(tabela.rows):
                     for j, celula in enumerate(linha.cells):
@@ -321,12 +340,14 @@ def main():
     
     anonimizador = Anonimizador()
     
+    # Interface para anonimização de texto
     st.header("Anonimização de Texto")
     texto_input = st.text_area("Digite o texto a ser anonimizado:", height=150)
     if st.button("Anonimizar Texto") and texto_input:
         texto_anonimizado = anonimizador.anonimizar_texto(texto_input)
         st.text_area("Texto Anonimizado:", texto_anonimizado, height=150)
     
+    # Interface para anonimização de arquivo
     st.header("Anonimização de Arquivo")
     arquivo = st.file_uploader(
         "Escolha um arquivo (.csv, .txt, .json, .pdf, .docx)",
@@ -335,8 +356,10 @@ def main():
     
     if arquivo is not None:
         try:
+            # Ler conteúdo do arquivo
             conteudo = arquivo.getvalue()
             
+            # Processar diferentes tipos de arquivo
             if arquivo.name.endswith('.csv'):
                 conteudo_texto = conteudo.decode('utf-8')
                 resultado = anonimizador.processar_csv(conteudo_texto)
