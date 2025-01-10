@@ -48,33 +48,49 @@ class Anonimizador:
 
     def processar_pdf(self, pdf_bytes: bytes) -> bytes:
         """Processa arquivo PDF e retorna versão anonimizada"""
-        # Criar PDF reader e writer
-        pdf_reader = PdfReader(io.BytesIO(pdf_bytes))
-        pdf_writer = PdfWriter()
-        
-        # Processar cada página
-        for page in pdf_reader.pages:
-            # Extrair texto da página
-            texto = page.extract_text()
+        try:
+            # Criar PDF reader e writer
+            pdf_reader = PdfReader(io.BytesIO(pdf_bytes))
+            pdf_writer = PdfWriter()
             
-            # Anonimizar o texto
-            texto_anonimizado = self.anonimizar_texto(texto)
+            # Processar cada página
+            for pagina in pdf_reader.pages:
+                # Extrair texto da página
+                texto = pagina.extract_text()
+                if texto:
+                    # Anonimizar o texto
+                    texto_anonimizado = self.anonimizar_texto(texto)
+                    
+                    # Criar nova página com texto anonimizado
+                    packet = io.BytesIO()
+                    c = canvas.Canvas(packet, pagesize=letter)
+                    
+                    # Quebrar o texto em linhas para melhor formatação
+                    linhas = texto_anonimizado.split('\n')
+                    y = 750  # Posição inicial Y
+                    for linha in linhas:
+                        if linha.strip():  # Ignorar linhas vazias
+                            c.drawString(50, y, linha)
+                            y -= 15  # Espaçamento entre linhas
+                    
+                    c.save()
+                    packet.seek(0)
+                    
+                    # Adicionar nova página ao PDF
+                    nova_pagina = PdfReader(packet).pages[0]
+                    pdf_writer.add_page(nova_pagina)
+                else:
+                    # Se não houver texto, manter a página original
+                    pdf_writer.add_page(pagina)
             
-            # Criar nova página com texto anonimizado
-            packet = io.BytesIO()
-            can = canvas.Canvas(packet, pagesize=letter)
-            can.drawString(10, 500, texto_anonimizado)
-            can.save()
+            # Salvar PDF anonimizado
+            output = io.BytesIO()
+            pdf_writer.write(output)
+            return output.getvalue()
             
-            # Mover para o início do BytesIO
-            packet.seek(0)
-            nova_pagina = PdfReader(packet).pages[0]
-            pdf_writer.add_page(nova_pagina)
-        
-        # Salvar PDF anonimizado
-        output = io.BytesIO()
-        pdf_writer.write(output)
-        return output.getvalue()
+        except Exception as e:
+            st.error(f"Erro ao processar PDF: {str(e)}")
+            return pdf_bytes  # Retorna o PDF original em caso de erro
 
     def processar_json(self, conteudo: str) -> dict:
         dados = json.loads(conteudo)
@@ -136,10 +152,11 @@ def main():
     
     if arquivo is not None:
         try:
-            conteudo = arquivo.getvalue().decode('utf-8')
+            conteudo = arquivo.getvalue()
             
             if arquivo.name.endswith('.csv'):
-                resultado = anonimizador.processar_csv(conteudo)
+                conteudo_texto = conteudo.decode('utf-8')
+                resultado = anonimizador.processar_csv(conteudo_texto)
                 csv = resultado.to_csv(index=False)
                 st.download_button(
                     "Download CSV Anonimizado",
@@ -148,7 +165,8 @@ def main():
                     "text/csv"
                 )
             elif arquivo.name.endswith('.json'):
-                resultado = anonimizador.processar_json(conteudo)
+                conteudo_texto = conteudo.decode('utf-8')
+                resultado = anonimizador.processar_json(conteudo_texto)
                 json_str = json.dumps(resultado, ensure_ascii=False, indent=2)
                 st.download_button(
                     "Download JSON Anonimizado",
@@ -157,7 +175,7 @@ def main():
                     "application/json"
                 )
             elif arquivo.name.endswith('.pdf'):
-                pdf_anonimizado = anonimizador.processar_pdf(arquivo.getvalue())
+                pdf_anonimizado = anonimizador.processar_pdf(conteudo)
                 st.download_button(
                     "Download PDF Anonimizado",
                     pdf_anonimizado,
@@ -165,7 +183,8 @@ def main():
                     "application/pdf"
                 )
             else:  # .txt
-                texto_anonimizado = anonimizador.anonimizar_texto(conteudo)
+                conteudo_texto = conteudo.decode('utf-8')
+                texto_anonimizado = anonimizador.anonimizar_texto(conteudo_texto)
                 st.download_button(
                     "Download TXT Anonimizado",
                     texto_anonimizado,
