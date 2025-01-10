@@ -6,6 +6,8 @@ import io
 from PyPDF2 import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
+from docx import Document
+from docx.shared import Pt
 from typing import Dict, List, Tuple
 
 class Anonimizador:
@@ -46,7 +48,66 @@ class Anonimizador:
                 df[coluna] = df[coluna].apply(self.anonimizar_texto)
         return df
 
-    def processar_pdf(self, pdf_bytes: bytes) -> bytes:
+    def processar_docx(self, docx_bytes: bytes) -> bytes:
+        """Processa arquivo DOCX e retorna versão anonimizada"""
+        try:
+            # Criar documento temporário a partir dos bytes
+            doc_temp = io.BytesIO(docx_bytes)
+            doc = Document(doc_temp)
+            
+            # Criar novo documento para conteúdo anonimizado
+            doc_anonimizado = Document()
+            
+            # Copiar estilos do documento original
+            for style in doc.styles:
+                if style.type == 1:  # Apenas estilos de parágrafo
+                    try:
+                        doc_anonimizado.styles.add_style(
+                            style.name, style.type, 
+                            base_style=doc_anonimizado.styles['Normal']
+                        )
+                    except:
+                        pass  # Ignora se o estilo já existe
+            
+            # Processar parágrafos
+            for para in doc.paragraphs:
+                # Adicionar parágrafo com mesmo estilo
+                novo_para = doc_anonimizado.add_paragraph(
+                    self.anonimizar_texto(para.text),
+                    style=para.style.name
+                )
+                
+                # Copiar formatação de runs
+                for idx, run in enumerate(para.runs):
+                    if idx < len(novo_para.runs):
+                        novo_run = novo_para.runs[idx]
+                        novo_run.bold = run.bold
+                        novo_run.italic = run.italic
+                        novo_run.underline = run.underline
+                        if run.font.size:
+                            novo_run.font.size = run.font.size
+            
+            # Processar tabelas
+            for tabela in doc.tables:
+                nova_tabela = doc_anonimizado.add_table(
+                    rows=len(tabela.rows),
+                    cols=len(tabela.columns)
+                )
+                nova_tabela.style = tabela.style
+                
+                for i, linha in enumerate(tabela.rows):
+                    for j, celula in enumerate(linha.cells):
+                        nova_celula = nova_tabela.cell(i, j)
+                        nova_celula.text = self.anonimizar_texto(celula.text)
+            
+            # Salvar documento anonimizado
+            output = io.BytesIO()
+            doc_anonimizado.save(output)
+            return output.getvalue()
+            
+        except Exception as e:
+            st.error(f"Erro ao processar DOCX: {str(e)}")
+            return docx_bytes  # Retorna o documento original em caso de erro
         """Processa arquivo PDF e retorna versão anonimizada"""
         try:
             # Criar PDF reader e writer
@@ -174,7 +235,14 @@ def main():
                     "anonimizado.json",
                     "application/json"
                 )
-            elif arquivo.name.endswith('.pdf'):
+            elif arquivo.name.endswith('.docx'):
+                docx_anonimizado = anonimizador.processar_docx(conteudo)
+                st.download_button(
+                    "Download DOCX Anonimizado",
+                    docx_anonimizado,
+                    "anonimizado.docx",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
                 pdf_anonimizado = anonimizador.processar_pdf(conteudo)
                 st.download_button(
                     "Download PDF Anonimizado",
