@@ -1,12 +1,8 @@
-# Interface e manipulação de dados
 streamlit
 pandas
-
-# Processamento de documentos
-python-docx
-PyPDF2
-reportlab
-
-# Presidio e suas dependências
 presidio-analyzer
 presidio-anonymizer
+spacy
+PyPDF2
+reportlab
+python-docx
