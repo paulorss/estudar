@@ -19,26 +19,57 @@ class SimpleAnalyzer:
         self.recognizers = self._create_recognizers()
     
     def _create_recognizers(self) -> List[PatternRecognizer]:
-        """Cria reconhecedores de padrões customizados"""
+        """Cria reconhecedores de padrões customizados para LGPD"""
         patterns = {
+            # Documentos
             "CPF": r"\d{3}\.?\d{3}\.?\d{3}-?\d{2}",
-            "RG": r"\d{2}\.?\d{3}\.?\d{3}-?\d{1}",
+            "RG": r"\d{2}\.?\d{3}\.?\d{3}[-]?\d{1}|\d{2}\.?\d{3}\.?\d{3}",
             "CNH": r"\d{11}",
+            "TITULO_ELEITOR": r"\d{4}\s?\d{4}\s?\d{4}",
+            "PIS": r"\d{3}\.?\d{5}\.?\d{2}[-]?\d{1}",
+            "PASSAPORTE": r"[A-Z]{2}\d{6}",
+            
+            # Dados Pessoais
+            "NOME_COMPLETO": r"(?i)([A-ZÀ-Ú][a-zà-ú]+(?:\s+(?:dos?|das?|de|e|[A-ZÀ-Ú][a-zà-ú]+))+)",
+            "NOME_PAIS": r"(?i)(?:pai|mãe|mae|genitor[a]?|father|mother)\s*:?\s*([A-ZÀ-Ú][a-zà-ú]+(?: (?:dos?|das?|de|e|[A-ZÀ-Ú][a-zà-ú]+))+)",
             "ESTADO_CIVIL": r"(?i)(solteiro|casado|divorciado|separado|viúvo|viuvo|união estável|uniao estavel)",
-            "NOME_COMPLETO": r"(?i)([A-ZÀ-Ú][a-zà-ú]+ (?:[A-ZÀ-Ú][a-zà-ú]+ )?[A-ZÀ-Ú][a-zà-ú]+)",
-            "NOME_PAIS": r"(?i)(pai|mae|mãe|father|mother|genitor|genitora)\s*:?\s*([A-ZÀ-Ú][a-zà-ú]+ (?:[A-ZÀ-Ú][a-zà-ú]+ )?[A-ZÀ-Ú][a-zà-ú]+)",
+            "PROFISSAO": r"(?i)profiss[ãa]o\s*:?\s*([A-ZÀ-Ú][a-zà-ú]+(?: [A-ZÀ-Ú][a-zà-ú]+)*)",
+            
+            # Dados de Contato
             "EMAIL": r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
-            "TELEFONE": r"(?:\+55\s?)?(?:\(\d{2}\)|\d{2})[-\s]?\d{4,5}[-\s]?\d{4}",
+            "TELEFONE": r"(?:\+55\s?)?(?:\(?\d{2}\)?[-\s]?)?\d{4,5}[-\s]?\d{4}",
+            "WHATSAPP": r"(?i)(?:whatsapp|wpp|zap)?\s*:?\s*(?:\+55\s?)?(?:\(?\d{2}\)?[-\s]?)?\d{4,5}[-\s]?\d{4}",
+            
+            # Dados Financeiros
             "CARTAO_CREDITO": r"\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}",
-            "ENDERECO": r"(?i)(?:Rua|Av|Avenida|Alameda|Al|Praça|R)\s+(?:[A-ZÀ-Ú][a-zà-ú]+\s*)+,?\s*\d+",
+            "CONTA_BANCARIA": r"(?i)(?:ag[êe]ncia|conta)\s*:?\s*\d{1,4}[-.]?\d{1,10}",
+            "RENDA": r"(?i)(?:sal[áa]rio|renda)\s*:?\s*R?\$?\s*\d+(?:\.\d{3})*(?:,\d{2})?",
+            
+            # Endereço
+            "ENDERECO": r"(?i)(?:Rua|Av|Avenida|Alameda|Al|Praça|R|Travessa|Rod|Rodovia)\s+(?:[A-ZÀ-Ú][a-zà-ú]+\s*)+,?\s*\d+",
             "CEP": r"\d{5}[-]?\d{3}",
-            "DATA": r"\d{2}[-/]\d{2}[-/]\d{4}"
+            "BAIRRO": r"(?i)(?:Bairro|B\.)\s*:?\s*[A-ZÀ-Ú][a-zà-ú]+(?: [A-ZÀ-Ú][a-zà-ú]+)*",
+            
+            # Dados Sensíveis
+            "RACA": r"(?i)(branco|preto|pardo|amarelo|indígena|indigena|negro)",
+            "RELIGIAO": r"(?i)(católico|catolico|evangélico|evangelico|espírita|espirita|umbanda|candomblé|candomble|judeu|muçulmano|muculmano|budista|ateu)",
+            "ORIENTACAO_SEXUAL": r"(?i)(heterossexual|homossexual|bissexual|gay|lésbica|lesbica|trans(?:exual|gênero|genero)?)",
+            
+            # Datas
+            "DATA": r"\d{2}[-/]\d{2}[-/]\d{4}|\d{2}\s+(?:de\s+)?(?:janeiro|fevereiro|março|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\s+(?:de\s+)?\d{4}",
+            "NASCIMENTO": r"(?i)(?:nascid[oa](?:\s+em)?|data\s+de\s+nascimento)\s*:?\s*\d{2}[-/]\d{2}[-/]\d{4}"
         }
         
         return [
             PatternRecognizer(
                 supported_entity=entity_type,
-                patterns=[Pattern(name=entity_type, regex=pattern, score=0.85)]
+                patterns=[
+                    Pattern(
+                        name=f"{entity_type}_pattern",
+                        regex=pattern,
+                        score=0.85
+                    )
+                ]
             )
             for entity_type, pattern in patterns.items()
         ]
@@ -47,7 +78,8 @@ class SimpleAnalyzer:
         """Analisa texto em busca de padrões"""
         results = []
         for recognizer in self.recognizers:
-            results.extend(recognizer.analyze(text))
+            # Cada recognizer analisa apenas sua própria entidade
+            results.extend(recognizer.analyze(text=text, entities=[recognizer.supported_entity]))
         return results
 
 class Anonimizador:
@@ -58,20 +90,47 @@ class Anonimizador:
         self.operator_config = self._get_operator_config()
     
     def _get_operator_config(self) -> Dict[str, OperatorConfig]:
-        """Retorna configurações de anonimização"""
+        """Retorna configurações de anonimização para cada tipo de dado"""
         return {
+            # Documentos - Mascaramento parcial
             "CPF": OperatorConfig("mask", {"chars_to_mask": 9, "masking_char": "*", "from_end": False}),
             "RG": OperatorConfig("mask", {"chars_to_mask": 7, "masking_char": "*", "from_end": False}),
             "CNH": OperatorConfig("mask", {"chars_to_mask": 8, "masking_char": "*", "from_end": False}),
-            "ESTADO_CIVIL": OperatorConfig("replace", {"new_value": "[ESTADO CIVIL PROTEGIDO]"}),
+            "TITULO_ELEITOR": OperatorConfig("mask", {"chars_to_mask": 8, "masking_char": "*", "from_end": False}),
+            "PIS": OperatorConfig("mask", {"chars_to_mask": 9, "masking_char": "*", "from_end": False}),
+            "PASSAPORTE": OperatorConfig("mask", {"chars_to_mask": 6, "masking_char": "*", "from_end": False}),
+            
+            # Dados Pessoais - Substituição total
             "NOME_COMPLETO": OperatorConfig("replace", {"new_value": "[NOME PROTEGIDO]"}),
             "NOME_PAIS": OperatorConfig("replace", {"new_value": "[FILIAÇÃO PROTEGIDA]"}),
+            "ESTADO_CIVIL": OperatorConfig("replace", {"new_value": "[ESTADO CIVIL PROTEGIDO]"}),
+            "PROFISSAO": OperatorConfig("replace", {"new_value": "[PROFISSÃO PROTEGIDA]"}),
+            
+            # Dados de Contato - Mascaramento parcial
             "EMAIL": OperatorConfig("mask", {"chars_to_mask": -1, "masking_char": "*", "from_end": False}),
             "TELEFONE": OperatorConfig("mask", {"chars_to_mask": 8, "masking_char": "*", "from_end": False}),
+            "WHATSAPP": OperatorConfig("mask", {"chars_to_mask": 8, "masking_char": "*", "from_end": False}),
+            
+            # Dados Financeiros - Mascaramento total
             "CARTAO_CREDITO": OperatorConfig("mask", {"chars_to_mask": 12, "masking_char": "*", "from_end": False}),
+            "CONTA_BANCARIA": OperatorConfig("replace", {"new_value": "[DADOS BANCÁRIOS PROTEGIDOS]"}),
+            "RENDA": OperatorConfig("replace", {"new_value": "[INFORMAÇÃO FINANCEIRA PROTEGIDA]"}),
+            
+            # Endereço - Substituição
             "ENDERECO": OperatorConfig("replace", {"new_value": "[ENDEREÇO PROTEGIDO]"}),
             "CEP": OperatorConfig("mask", {"chars_to_mask": 5, "masking_char": "*", "from_end": False}),
+            "BAIRRO": OperatorConfig("replace", {"new_value": "[BAIRRO PROTEGIDO]"}),
+            
+            # Dados Sensíveis - Substituição total
+            "RACA": OperatorConfig("replace", {"new_value": "[DADO SENSÍVEL - RAÇA]"}),
+            "RELIGIAO": OperatorConfig("replace", {"new_value": "[DADO SENSÍVEL - RELIGIÃO]"}),
+            "ORIENTACAO_SEXUAL": OperatorConfig("replace", {"new_value": "[DADO SENSÍVEL - ORIENTAÇÃO SEXUAL]"}),
+            
+            # Datas - Substituição
             "DATA": OperatorConfig("replace", {"new_value": "[DATA PROTEGIDA]"}),
+            "NASCIMENTO": OperatorConfig("replace", {"new_value": "[DATA DE NASCIMENTO PROTEGIDA]"}),
+            
+            # Padrão para outros tipos de dados
             "DEFAULT": OperatorConfig("replace", {"new_value": "[DADO PROTEGIDO]"})
         }
     
