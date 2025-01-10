@@ -4,9 +4,6 @@ import json
 import io
 import re
 from typing import List, Dict, Any, Optional
-from presidio_anonymizer import AnonymizerEngine
-from presidio_analyzer import Pattern, PatternRecognizer, RecognizerResult
-from presidio_anonymizer.entities import OperatorConfig
 from PyPDF2 import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
@@ -18,7 +15,7 @@ class SimpleAnalyzer:
     
     def __init__(self):
         self.patterns = self._get_patterns()
-        self.recognizers = self._create_recognizers()
+        self.compiled_patterns = self._compile_patterns()
     
     def _get_patterns(self) -> Dict[str, str]:
         """Define os padrões de regex para cada tipo de dado"""
@@ -62,108 +59,126 @@ class SimpleAnalyzer:
             "NASCIMENTO": r"(?i)(?:nascid[oa](?:\s+em)?|data\s+de\s+nascimento)\s*:?\s*\d{2}[-/]\d{2}[-/]\d{4}"
         }
     
-    def _create_recognizers(self) -> List[PatternRecognizer]:
-        """Cria reconhecedores de padrões"""
-        recognizers = []
-        for entity_type, regex in self.patterns.items():
-            pattern = Pattern(
-                name=f"{entity_type}_pattern",
-                regex=regex,
-                score=0.85
-            )
-            recognizer = PatternRecognizer(
-                name=f"{entity_type}_recognizer",
-                supported_entity=entity_type,
-                patterns=[pattern]
-            )
-            recognizers.append(recognizer)
-        return recognizers
+    def _compile_patterns(self) -> Dict[str, re.Pattern]:
+        """Compila os padrões regex"""
+        return {entity_type: re.compile(pattern) for entity_type, pattern in self.patterns.items()}
     
-    def analyze(self, text: str) -> List[RecognizerResult]:
+    def analyze(self, text: str) -> List[Dict[str, Any]]:
         """Analisa texto em busca de padrões"""
         results = []
-        for recognizer in self.recognizers:
-            try:
-                results.extend(recognizer.analyze(text, entities=[recognizer.supported_entity]))
-            except Exception as e:
-                st.warning(f"Erro ao processar {recognizer.supported_entity}: {str(e)}")
-        return results
+        for entity_type, pattern in self.compiled_patterns.items():
+            matches = pattern.finditer(text)
+            for match in matches:
+                results.append({
+                    'entity_type': entity_type,
+                    'start': match.start(),
+                    'end': match.end(),
+                    'score': 0.85,
+                    'text': match.group()
+                })
+        return sorted(results, key=lambda x: x['start'])
 
 class Anonimizador:
     def __init__(self):
         """Inicializa o anonimizador"""
         self.analyzer = SimpleAnalyzer()
-        self.anonymizer = AnonymizerEngine()
         self.operator_config = self._get_operator_config()
     
-    def _get_operator_config(self) -> Dict[str, OperatorConfig]:
+    def _get_operator_config(self) -> Dict[str, Dict[str, Any]]:
         """Retorna configurações de anonimização para cada tipo de dado"""
         return {
             # Documentos - Mascaramento parcial
-            "CPF": OperatorConfig("mask", {"chars_to_mask": 9, "masking_char": "*", "from_end": False}),
-            "RG": OperatorConfig("mask", {"chars_to_mask": 7, "masking_char": "*", "from_end": False}),
-            "CNH": OperatorConfig("mask", {"chars_to_mask": 8, "masking_char": "*", "from_end": False}),
-            "TITULO_ELEITOR": OperatorConfig("mask", {"chars_to_mask": 8, "masking_char": "*", "from_end": False}),
-            "PIS": OperatorConfig("mask", {"chars_to_mask": 9, "masking_char": "*", "from_end": False}),
-            "PASSAPORTE": OperatorConfig("mask", {"chars_to_mask": 6, "masking_char": "*", "from_end": False}),
+            "CPF": {"type": "mask", "chars_to_mask": 9, "masking_char": "*", "from_end": False},
+            "RG": {"type": "mask", "chars_to_mask": 7, "masking_char": "*", "from_end": False},
+            "CNH": {"type": "mask", "chars_to_mask": 8, "masking_char": "*", "from_end": False},
+            "TITULO_ELEITOR": {"type": "mask", "chars_to_mask": 8, "masking_char": "*", "from_end": False},
+            "PIS": {"type": "mask", "chars_to_mask": 9, "masking_char": "*", "from_end": False},
+            "PASSAPORTE": {"type": "mask", "chars_to_mask": 6, "masking_char": "*", "from_end": False},
             
             # Dados Pessoais - Substituição total
-            "NOME_COMPLETO": OperatorConfig("replace", {"new_value": "[NOME PROTEGIDO]"}),
-            "NOME_PAIS": OperatorConfig("replace", {"new_value": "[FILIAÇÃO PROTEGIDA]"}),
-            "ESTADO_CIVIL": OperatorConfig("replace", {"new_value": "[ESTADO CIVIL PROTEGIDO]"}),
-            "PROFISSAO": OperatorConfig("replace", {"new_value": "[PROFISSÃO PROTEGIDA]"}),
+            "NOME_COMPLETO": {"type": "replace", "new_value": "[NOME PROTEGIDO]"},
+            "NOME_PAIS": {"type": "replace", "new_value": "[FILIAÇÃO PROTEGIDA]"},
+            "ESTADO_CIVIL": {"type": "replace", "new_value": "[ESTADO CIVIL PROTEGIDO]"},
+            "PROFISSAO": {"type": "replace", "new_value": "[PROFISSÃO PROTEGIDA]"},
             
             # Dados de Contato - Mascaramento parcial
-            "EMAIL": OperatorConfig("mask", {"chars_to_mask": -1, "masking_char": "*", "from_end": False}),
-            "TELEFONE": OperatorConfig("mask", {"chars_to_mask": 8, "masking_char": "*", "from_end": False}),
-            "WHATSAPP": OperatorConfig("mask", {"chars_to_mask": 8, "masking_char": "*", "from_end": False}),
+            "EMAIL": {"type": "mask", "chars_to_mask": -1, "masking_char": "*", "from_end": False},
+            "TELEFONE": {"type": "mask", "chars_to_mask": 8, "masking_char": "*", "from_end": False},
+            "WHATSAPP": {"type": "mask", "chars_to_mask": 8, "masking_char": "*", "from_end": False},
             
             # Dados Financeiros - Mascaramento total
-            "CARTAO_CREDITO": OperatorConfig("mask", {"chars_to_mask": 12, "masking_char": "*", "from_end": False}),
-            "CONTA_BANCARIA": OperatorConfig("replace", {"new_value": "[DADOS BANCÁRIOS PROTEGIDOS]"}),
-            "RENDA": OperatorConfig("replace", {"new_value": "[INFORMAÇÃO FINANCEIRA PROTEGIDA]"}),
+            "CARTAO_CREDITO": {"type": "mask", "chars_to_mask": 12, "masking_char": "*", "from_end": False},
+            "CONTA_BANCARIA": {"type": "replace", "new_value": "[DADOS BANCÁRIOS PROTEGIDOS]"},
+            "RENDA": {"type": "replace", "new_value": "[INFORMAÇÃO FINANCEIRA PROTEGIDA]"},
             
             # Endereço - Substituição
-            "ENDERECO": OperatorConfig("replace", {"new_value": "[ENDEREÇO PROTEGIDO]"}),
-            "CEP": OperatorConfig("mask", {"chars_to_mask": 5, "masking_char": "*", "from_end": False}),
-            "BAIRRO": OperatorConfig("replace", {"new_value": "[BAIRRO PROTEGIDO]"}),
+            "ENDERECO": {"type": "replace", "new_value": "[ENDEREÇO PROTEGIDO]"},
+            "CEP": {"type": "mask", "chars_to_mask": 5, "masking_char": "*", "from_end": False},
+            "BAIRRO": {"type": "replace", "new_value": "[BAIRRO PROTEGIDO]"},
             
             # Dados Sensíveis - Substituição total
-            "RACA": OperatorConfig("replace", {"new_value": "[DADO SENSÍVEL - RAÇA]"}),
-            "RELIGIAO": OperatorConfig("replace", {"new_value": "[DADO SENSÍVEL - RELIGIÃO]"}),
-            "ORIENTACAO_SEXUAL": OperatorConfig("replace", {"new_value": "[DADO SENSÍVEL - ORIENTAÇÃO SEXUAL]"}),
+            "RACA": {"type": "replace", "new_value": "[DADO SENSÍVEL - RAÇA]"},
+            "RELIGIAO": {"type": "replace", "new_value": "[DADO SENSÍVEL - RELIGIÃO]"},
+            "ORIENTACAO_SEXUAL": {"type": "replace", "new_value": "[DADO SENSÍVEL - ORIENTAÇÃO SEXUAL]"},
             
             # Datas - Substituição
-            "DATA": OperatorConfig("replace", {"new_value": "[DATA PROTEGIDA]"}),
-            "NASCIMENTO": OperatorConfig("replace", {"new_value": "[DATA DE NASCIMENTO PROTEGIDA]"}),
+            "DATA": {"type": "replace", "new_value": "[DATA PROTEGIDA]"},
+            "NASCIMENTO": {"type": "replace", "new_value": "[DATA DE NASCIMENTO PROTEGIDA]"},
             
             # Padrão para outros tipos de dados
-            "DEFAULT": OperatorConfig("replace", {"new_value": "[DADO PROTEGIDO]"})
+            "DEFAULT": {"type": "replace", "new_value": "[DADO PROTEGIDO]"}
         }
-
-def anonimizar_texto(self, texto: str) -> str:
+    
+    def _apply_mask(self, text: str, config: Dict[str, Any]) -> str:
+        """Aplica mascaramento ao texto baseado na configuração"""
+        chars_to_mask = config.get('chars_to_mask', len(text))
+        masking_char = config.get('masking_char', '*')
+        from_end = config.get('from_end', False)
+        
+        if from_end:
+            return text[:-chars_to_mask] + masking_char * chars_to_mask
+        return masking_char * chars_to_mask + text[chars_to_mask:]
+    
+    def _apply_replacement(self, text: str, config: Dict[str, Any]) -> str:
+        """Aplica substituição ao texto baseado na configuração"""
+        return config.get('new_value', '[DADO PROTEGIDO]')
+    
+    def anonimizar_texto(self, text: str) -> str:
         """Anonimiza texto"""
-        if not isinstance(texto, str) or not texto.strip():
-            return texto
+        if not isinstance(text, str) or not text.strip():
+            return text
             
         try:
-            # Analisar texto
-            resultados = self.analyzer.analyze(texto)
+            # Analisa texto
+            results = self.analyzer.analyze(text)
+            if not results:
+                return text
             
-            if not resultados:  # Se não encontrou dados sensíveis
-                return texto
+            # Ordena resultados pela posição inicial em ordem reversa
+            results.sort(key=lambda x: x['start'], reverse=True)
+            
+            # Aplica anonimização
+            modified_text = text
+            for result in results:
+                entity_type = result['entity_type']
+                config = self.operator_config.get(entity_type, self.operator_config.get('DEFAULT'))
                 
-            # Anonimizar texto
-            texto_anonimizado = self.anonymizer.anonymize(
-                text=texto,
-                analyzer_results=resultados,
-                operators=self.operator_config
-            )
+                if config['type'] == 'mask':
+                    replacement = self._apply_mask(result['text'], config)
+                else:  # replace
+                    replacement = self._apply_replacement(result['text'], config)
+                
+                modified_text = (
+                    modified_text[:result['start']] +
+                    replacement +
+                    modified_text[result['end']:]
+                )
             
-            return texto_anonimizado.text
+            return modified_text
+            
         except Exception as e:
             st.error(f"Erro ao anonimizar texto: {str(e)}")
-            return texto
+            return text
 
     def processar_csv(self, conteudo: str) -> pd.DataFrame:
         """Processa arquivo CSV"""
@@ -221,7 +236,6 @@ def anonimizar_texto(self, texto: str) -> str:
                     c.save()
                     packet.seek(0)
                     nova_pagina = PdfReader(packet).pages[0]
-                    pdf
                     pdf_writer.add_page(nova_pagina)
                 else:
                     pdf_writer.add_page(pagina)
