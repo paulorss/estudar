@@ -3,8 +3,7 @@ import pandas as pd
 import json
 import io
 from typing import List, Dict, Any, Optional
-import spacy
-from presidio_analyzer import AnalyzerEngine, RecognizerRegistry, PatternRecognizer, Pattern, EntityRecognizer
+from presidio_analyzer import PatternRecognizer, Pattern, RecognizerResult
 from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
 from PyPDF2 import PdfReader, PdfWriter
@@ -13,92 +12,77 @@ from reportlab.lib.pagesizes import letter
 from docx import Document
 from docx.shared import Pt
 
-class PresidioConfig:
-    """Configuração do Presidio com suporte a reconhecedores customizados para LGPD"""
+class SimpleAnalyzer:
+    """Analisador simplificado baseado em padrões"""
     
-    @staticmethod
-    def get_custom_patterns() -> Dict[str, Pattern]:
-        return {
-            "CPF": Pattern(
-                name="cpf_pattern",
-                regex=r"\d{3}\.?\d{3}\.?\d{3}-?\d{2}",
-                score=0.9
-            ),
-            "RG": Pattern(
-                name="rg_pattern",
-                regex=r"\d{2}\.?\d{3}\.?\d{3}-?\d{1}",
-                score=0.9
-            ),
-            "CNH": Pattern(
-                name="cnh_pattern",
-                regex=r"\d{11}",
-                score=0.8
-            ),
-            "ESTADO_CIVIL": Pattern(
-                name="estado_civil_pattern",
-                regex=r"(?i)(solteiro|casado|divorciado|separado|viúvo|viuvo|união estável|uniao estavel)",
-                score=0.7
-            ),
-            "NOME_PAIS": Pattern(
-                name="nome_pais_pattern",
-                regex=r"(?i)(pai|mae|mãe|father|mother|genitor|genitora)\s*:?\s*([A-ZÀ-Ú][a-zà-ú]+ (?:[A-ZÀ-Ú][a-zà-ú]+ )?[A-ZÀ-Ú][a-zà-ú]+)",
-                score=0.8
-            )
+    def __init__(self):
+        self.recognizers = self._create_recognizers()
+    
+    def _create_recognizers(self) -> List[PatternRecognizer]:
+        """Cria reconhecedores de padrões customizados"""
+        patterns = {
+            "CPF": r"\d{3}\.?\d{3}\.?\d{3}-?\d{2}",
+            "RG": r"\d{2}\.?\d{3}\.?\d{3}-?\d{1}",
+            "CNH": r"\d{11}",
+            "ESTADO_CIVIL": r"(?i)(solteiro|casado|divorciado|separado|viúvo|viuvo|união estável|uniao estavel)",
+            "NOME_COMPLETO": r"(?i)([A-ZÀ-Ú][a-zà-ú]+ (?:[A-ZÀ-Ú][a-zà-ú]+ )?[A-ZÀ-Ú][a-zà-ú]+)",
+            "NOME_PAIS": r"(?i)(pai|mae|mãe|father|mother|genitor|genitora)\s*:?\s*([A-ZÀ-Ú][a-zà-ú]+ (?:[A-ZÀ-Ú][a-zà-ú]+ )?[A-ZÀ-Ú][a-zà-ú]+)",
+            "EMAIL": r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
+            "TELEFONE": r"(?:\+55\s?)?(?:\(\d{2}\)|\d{2})[-\s]?\d{4,5}[-\s]?\d{4}",
+            "CARTAO_CREDITO": r"\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}",
+            "ENDERECO": r"(?i)(?:Rua|Av|Avenida|Alameda|Al|Praça|R)\s+(?:[A-ZÀ-Ú][a-zà-ú]+\s*)+,?\s*\d+",
+            "CEP": r"\d{5}[-]?\d{3}",
+            "DATA": r"\d{2}[-/]\d{2}[-/]\d{4}"
         }
+        
+        return [
+            PatternRecognizer(
+                supported_entity=entity_type,
+                patterns=[Pattern(name=entity_type, regex=pattern, score=0.85)]
+            )
+            for entity_type, pattern in patterns.items()
+        ]
     
-    @staticmethod
-    def get_operator_config() -> Dict[str, OperatorConfig]:
+    def analyze(self, text: str) -> List[RecognizerResult]:
+        """Analisa texto em busca de padrões"""
+        results = []
+        for recognizer in self.recognizers:
+            results.extend(recognizer.analyze(text))
+        return results
+
+class Anonimizador:
+    def __init__(self):
+        """Inicializa o anonimizador"""
+        self.analyzer = SimpleAnalyzer()
+        self.anonymizer = AnonymizerEngine()
+        self.operator_config = self._get_operator_config()
+    
+    def _get_operator_config(self) -> Dict[str, OperatorConfig]:
+        """Retorna configurações de anonimização"""
         return {
-            "PERSON": OperatorConfig("replace", {"new_value": "[NOME PROTEGIDO]"}),
             "CPF": OperatorConfig("mask", {"chars_to_mask": 9, "masking_char": "*", "from_end": False}),
             "RG": OperatorConfig("mask", {"chars_to_mask": 7, "masking_char": "*", "from_end": False}),
             "CNH": OperatorConfig("mask", {"chars_to_mask": 8, "masking_char": "*", "from_end": False}),
             "ESTADO_CIVIL": OperatorConfig("replace", {"new_value": "[ESTADO CIVIL PROTEGIDO]"}),
+            "NOME_COMPLETO": OperatorConfig("replace", {"new_value": "[NOME PROTEGIDO]"}),
             "NOME_PAIS": OperatorConfig("replace", {"new_value": "[FILIAÇÃO PROTEGIDA]"}),
-            "EMAIL_ADDRESS": OperatorConfig("mask", {"chars_to_mask": -1, "masking_char": "*", "from_end": False}),
-            "PHONE_NUMBER": OperatorConfig("mask", {"chars_to_mask": 8, "masking_char": "*", "from_end": False}),
-            "CREDIT_CARD": OperatorConfig("mask", {"chars_to_mask": 12, "masking_char": "*", "from_end": False}),
-            "LOCATION": OperatorConfig("replace", {"new_value": "[LOCALIZAÇÃO PROTEGIDA]"}),
-            "DATE_TIME": OperatorConfig("replace", {"new_value": "[DATA PROTEGIDA]"}),
-            "NRP": OperatorConfig("replace", {"new_value": "[DOCUMENTO PROTEGIDO]"}),
+            "EMAIL": OperatorConfig("mask", {"chars_to_mask": -1, "masking_char": "*", "from_end": False}),
+            "TELEFONE": OperatorConfig("mask", {"chars_to_mask": 8, "masking_char": "*", "from_end": False}),
+            "CARTAO_CREDITO": OperatorConfig("mask", {"chars_to_mask": 12, "masking_char": "*", "from_end": False}),
+            "ENDERECO": OperatorConfig("replace", {"new_value": "[ENDEREÇO PROTEGIDO]"}),
+            "CEP": OperatorConfig("mask", {"chars_to_mask": 5, "masking_char": "*", "from_end": False}),
+            "DATA": OperatorConfig("replace", {"new_value": "[DATA PROTEGIDA]"}),
             "DEFAULT": OperatorConfig("replace", {"new_value": "[DADO PROTEGIDO]"})
         }
-
-class Anonimizador:
-    def __init__(self):
-        """Inicializa o anonimizador com Presidio"""
-        # Configurar analisador
-        registry = RecognizerRegistry()
-        self.add_custom_recognizers(registry)
-        
-        # Inicializar engines
-        self.analyzer = AnalyzerEngine(registry=registry)
-        self.anonymizer = AnonymizerEngine()
-        
-        # Carregar configurações
-        self.operator_config = PresidioConfig.get_operator_config()
-    
-    def add_custom_recognizers(self, registry: RecognizerRegistry) -> None:
-        """Adiciona reconhecedores customizados ao registro"""
-        patterns = PresidioConfig.get_custom_patterns()
-        for entity_type, pattern in patterns.items():
-            recognizer = PatternRecognizer(
-                supported_entity=entity_type,
-                patterns=[pattern]
-            )
-            registry.add_recognizer(recognizer)
     
     def anonimizar_texto(self, texto: str) -> str:
-        """Anonimiza texto usando Presidio"""
+        """Anonimiza texto"""
         if not isinstance(texto, str) or not texto.strip():
             return texto
             
         try:
             # Analisar texto
-            resultados = self.analyzer.analyze(
-                text=texto,
-                language='pt'
-            )
+            resultados = self.analyzer.analyze(texto)
             
             # Anonimizar texto
             texto_anonimizado = self.anonymizer.anonymize(
@@ -139,24 +123,18 @@ class Anonimizador:
     def processar_pdf(self, pdf_bytes: bytes) -> bytes:
         """Processa arquivo PDF"""
         try:
-            # Criar PDF reader e writer
             pdf_reader = PdfReader(io.BytesIO(pdf_bytes))
             pdf_writer = PdfWriter()
             
-            # Processar cada página
             for pagina in pdf_reader.pages:
-                # Extrair texto da página
                 texto = pagina.extract_text()
                 if texto:
-                    # Anonimizar o texto
                     texto_anonimizado = self.anonimizar_texto(texto)
                     
-                    # Criar nova página com texto anonimizado
                     packet = io.BytesIO()
                     c = canvas.Canvas(packet, pagesize=letter)
                     
-                    # Quebrar o texto em linhas para melhor formatação
-                    y = 750  # Posição inicial Y
+                    y = 750
                     for linha in texto_anonimizado.split('\n'):
                         if linha.strip():
                             c.drawString(50, y, linha)
@@ -169,7 +147,6 @@ class Anonimizador:
                 else:
                     pdf_writer.add_page(pagina)
             
-            # Salvar PDF anonimizado
             output = io.BytesIO()
             pdf_writer.write(output)
             return output.getvalue()
@@ -181,12 +158,10 @@ class Anonimizador:
     def processar_docx(self, docx_bytes: bytes) -> bytes:
         """Processa arquivo DOCX"""
         try:
-            # Criar documento
             doc_temp = io.BytesIO(docx_bytes)
             doc = Document(doc_temp)
             doc_anonimizado = Document()
             
-            # Copiar estilos
             for style in doc.styles:
                 if style.type == 1:
                     try:
@@ -197,14 +172,12 @@ class Anonimizador:
                     except:
                         pass
             
-            # Processar parágrafos
             for para in doc.paragraphs:
                 novo_para = doc_anonimizado.add_paragraph(
                     self.anonimizar_texto(para.text),
                     style=para.style.name
                 )
                 
-                # Copiar formatação
                 for idx, run in enumerate(para.runs):
                     if idx < len(novo_para.runs):
                         novo_run = novo_para.runs[idx]
@@ -214,7 +187,6 @@ class Anonimizador:
                         if run.font.size:
                             novo_run.font.size = run.font.size
             
-            # Processar tabelas
             for tabela in doc.tables:
                 nova_tabela = doc_anonimizado.add_table(
                     rows=len(tabela.rows),
@@ -227,7 +199,6 @@ class Anonimizador:
                         nova_celula = nova_tabela.cell(i, j)
                         nova_celula.text = self.anonimizar_texto(celula.text)
             
-            # Salvar documento
             output = io.BytesIO()
             doc_anonimizado.save(output)
             return output.getvalue()
@@ -237,7 +208,7 @@ class Anonimizador:
             return docx_bytes
 
 def main():
-    st.title("Anonimizador de Dados - LGPD com Presidio")
+    st.title("Anonimizador de Dados - LGPD")
     
     st.markdown("""
     ### Dados detectados e anonimizados:
@@ -255,23 +226,18 @@ def main():
     - E-mails (mascaramento)
     - Telefones (mascaramento)
     - Endereços
+    - CEP
     - Datas
-    
-    **Dados Sensíveis (Art. 5º LGPD):**
-    - Detecção automática de dados sensíveis via Presidio
     """)
     
-    # Inicializar anonimizador
     anonimizador = Anonimizador()
     
-    # Interface para entrada de texto
     st.header("Anonimização de Texto")
     texto_input = st.text_area("Digite o texto a ser anonimizado:", height=150)
     if st.button("Anonimizar Texto") and texto_input:
         texto_anonimizado = anonimizador.anonimizar_texto(texto_input)
         st.text_area("Texto Anonimizado:", texto_anonimizado, height=150)
     
-    # Interface para upload de arquivo
     st.header("Anonimização de Arquivo")
     arquivo = st.file_uploader(
         "Escolha um arquivo (.csv, .txt, .json, .pdf, .docx)",
@@ -316,7 +282,7 @@ def main():
                     "Download PDF Anonimizado",
                     pdf_anonimizado,
                     "anonimizado.pdf",
-                    "application/pdf"
+                "application/pdf"
                 )
             else:  # .txt
                 conteudo_texto = conteudo.decode('utf-8')
