@@ -1,0 +1,12 @@
+streamlit
+pandas
+presidio-analyzer
+presidio-anonymizer
+spacy
+pt-core-news-lg @ https://github.com/explosion/spacy-models/releases/download/pt_core_news_lg-3.7.0/pt_core_news_lg-3.7.0.tar.gz
+regex
+tqdm
+pyyaml
+python-dateutil
+protobuf
+typing-extensions
