@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import json
 import io
+import sys
+import subprocess
 from typing import List, Dict, Any, Optional
 from PyPDF2 import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
@@ -12,11 +14,30 @@ from presidio_analyzer import RecognizerRegistry, PatternRecognizer, AnalyzerEng
 from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
 
-# Load spaCy model at startup
+@st.cache_resource
+def load_spacy_model():
+    """Load Portuguese language model, downloading it if necessary"""
+    try:
+        # Try to load the model
+        return spacy.load("pt_core_news_lg")
+    except OSError:
+        # If model is not found, download it
+        st.info("Downloading Portuguese language model... This may take a while.")
+        subprocess.check_call([
+            sys.executable, 
+            "-m", 
+            "spacy", 
+            "download", 
+            "pt_core_news_lg"
+        ])
+        return spacy.load("pt_core_news_lg")
+
+# Initialize spaCy
 try:
-    nlp = spacy.load("pt_core_news_lg")
-except:
-    st.error("Error: Could not load the Portuguese language model. Please ensure it's installed correctly.")
+    nlp = load_spacy_model()
+    st.success("Modelo de linguagem carregado com sucesso!")
+except Exception as e:
+    st.error(f"Erro ao carregar modelo de linguagem: {str(e)}")
     st.stop()
 
 class CustomAnalyzer:
@@ -36,8 +57,88 @@ class CustomAnalyzer:
 
     def setup_recognizers(self):
         """Setup all custom recognizers for Brazilian documents and data"""
-        # [Rest of the recognizers code remains the same]
+        recognizers = [
+            # Documentos
+            PatternRecognizer(
+                supported_entity="CPF",
+                patterns=[{
+                    "pattern": r"\d{3}\.?\d{3}\.?\d{3}-?\d{2}",
+                    "score": 0.95
+                }]
+            ),
+            PatternRecognizer(
+                supported_entity="RG",
+                patterns=[{
+                    "pattern": r"\d{2}\.?\d{3}\.?\d{3}[-]?\d{1}|\d{2}\.?\d{3}\.?\d{3}",
+                    "score": 0.95
+                }]
+            ),
+            PatternRecognizer(
+                supported_entity="CNH",
+                patterns=[{
+                    "pattern": r"\d{11}",
+                    "score": 0.5
+                }]
+            ),
+            # Contato
+            PatternRecognizer(
+                supported_entity="EMAIL",
+                patterns=[{
+                    "pattern": r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
+                    "score": 0.95
+                }]
+            ),
+            PatternRecognizer(
+                supported_entity="PHONE",
+                patterns=[{
+                    "pattern": r"(?:\+55\s?)?(?:\(?\d{2}\)?[-\s]?)?\d{4,5}[-\s]?\d{4}",
+                    "score": 0.95
+                }]
+            ),
+            # Dados Bancários
+            PatternRecognizer(
+                supported_entity="CREDIT_CARD",
+                patterns=[{
+                    "pattern": r"\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}",
+                    "score": 0.95
+                }]
+            ),
+            PatternRecognizer(
+                supported_entity="BANK_ACCOUNT",
+                patterns=[{
+                    "pattern": r"(?:ag[êe]ncia|conta)\s*:?\s*\d{1,4}[-.]?\d{1,10}",
+                    "score": 0.85
+                }]
+            ),
+            # Endereço
+            PatternRecognizer(
+                supported_entity="CEP",
+                patterns=[{
+                    "pattern": r"\d{5}[-]?\d{3}",
+                    "score": 0.95
+                }]
+            ),
+            PatternRecognizer(
+                supported_entity="ADDRESS",
+                patterns=[{
+                    "pattern": r"(?:Rua|Av|Avenida|Alameda|Al|Praça|R|Travessa|Rod|Rodovia)\s+(?:[A-ZÀ-Ú][a-zà-ú]+\s*)+,?\s*\d+",
+                    "score": 0.85
+                }]
+            ),
+            # Nomes
+            PatternRecognizer(
+                supported_entity="PERSON",
+                patterns=[{
+                    "pattern": r"(?i)([A-ZÀ-Ú][a-zà-ú]+(?:\s+(?:dos?|das?|de|e|[A-ZÀ-Ú][a-zà-ú]+))+)",
+                    "score": 0.7
+                }]
+            )
+        ]
         
+        # Add all recognizers to registry
+        for recognizer in recognizers:
+            self.registry.add_recognizer(recognizer)
+
     def analyze_text(self, text: str) -> List[Dict]:
         """Analyze text using custom recognizers"""
         if not isinstance(text, str) or not text.strip():
@@ -54,7 +155,7 @@ class CustomAnalyzer:
                 ]
             )
         except Exception as e:
-            st.error(f"Error analyzing text: {str(e)}")
+            st.error(f"Erro ao analisar texto: {str(e)}")
             return []
 
     def anonymize_text(self, text: str) -> str:
@@ -167,39 +268,14 @@ class CustomAnalyzer:
             doc = Document(doc_temp)
             anonymized_doc = Document()
             
-            for style in doc.styles:
-                if style.type == 1:
-                    try:
-                        anonymized_doc.styles.add_style(
-                            style.name, style.type,
-                            base_style=anonymized_doc.styles['Normal']
-                        )
-                    except:
-                        pass
-            
             for para in doc.paragraphs:
-                new_para = anonymized_doc.add_paragraph(
-                    self.anonymize_text(para.text),
-                    style=para.style.name if para.style else None
-                )
-                
-                for idx, run in enumerate(para.runs):
-                    if idx < len(new_para.runs):
-                        new_run = new_para.runs[idx]
-                        new_run.bold = run.bold
-                        new_run.italic = run.italic
-                        new_run.underline = run.underline
-                        if run.font.size:
-                            new_run.font.size = run.font.size
+                anonymized_doc.add_paragraph(self.anonymize_text(para.text))
             
             for table in doc.tables:
                 new_table = anonymized_doc.add_table(
                     rows=len(table.rows),
                     cols=len(table.columns)
                 )
-                
-                if table.style:
-                    new_table.style = table.style
                 
                 for i, row in enumerate(table.rows):
                     for j, cell in enumerate(row.cells):
@@ -220,6 +296,8 @@ def main():
         page_icon="🔒",
         layout="wide"
     )
+    
+    st.title("Anonimizador de Dados - LGPD")
     
     st.markdown("""
     ### Dados detectados e anonimizados:
@@ -268,13 +346,15 @@ def main():
             if file.name.endswith('.csv'):
                 content_text = content.decode('utf-8')
                 result = analyzer.process_csv(content_text)
-                csv = result.to_csv(index=False)
+                                    csv = result.to_csv(index=False)
                 st.download_button(
                     "Download CSV Anonimizado",
                     csv,
                     "anonimizado.csv",
                     "text/csv"
                 )
+                st.write("Preview do arquivo anonimizado:")
+                st.dataframe(result)
                 
             elif file.name.endswith('.json'):
                 content_text = content.decode('utf-8')
@@ -286,6 +366,8 @@ def main():
                     "anonimizado.json",
                     "application/json"
                 )
+                st.write("Preview do arquivo anonimizado:")
+                st.json(result)
                 
             elif file.name.endswith('.docx'):
                 docx_anonymized = analyzer.process_docx(content)
@@ -314,6 +396,8 @@ def main():
                     "anonimizado.txt",
                     "text/plain"
                 )
+                st.write("Preview do arquivo anonimizado:")
+                st.text_area("Conteúdo:", anonymized_text, height=300)
             
             st.success("Arquivo processado com sucesso!")
             
