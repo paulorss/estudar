@@ -2,37 +2,14 @@ import streamlit as st
 import pandas as pd
 import json
 import io
-import sys
-import subprocess
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from PyPDF2 import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 from docx import Document
-import spacy
 from presidio_analyzer import RecognizerRegistry, PatternRecognizer, AnalyzerEngine
 from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
-
-@st.cache_resource
-def load_spacy_model():
-    """Load Portuguese language model"""
-    try:
-        return spacy.load("pt_core_news_lg")
-    except Exception as e:
-        st.error(f"Erro ao carregar modelo de linguagem: {str(e)}")
-        st.stop()
-
-# Initialize spaCy
-nlp = load_spacy_model()
-
-# Initialize spaCy
-try:
-    nlp = load_spacy_model()
-    st.success("Modelo de linguagem carregado com sucesso!")
-except Exception as e:
-    st.error(f"Erro ao carregar modelo de linguagem: {str(e)}")
-    st.stop()
 
 class CustomAnalyzer:
     def __init__(self):
@@ -119,13 +96,19 @@ class CustomAnalyzer:
                     "score": 0.85
                 }]
             ),
-            # Nomes
+            # Nomes - Padrão melhorado para nomes brasileiros
             PatternRecognizer(
                 supported_entity="PERSON",
-                patterns=[{
-                    "pattern": r"(?i)([A-ZÀ-Ú][a-zà-ú]+(?:\s+(?:dos?|das?|de|e|[A-ZÀ-Ú][a-zà-ú]+))+)",
-                    "score": 0.7
-                }]
+                patterns=[
+                    {
+                        "pattern": r"(?i)([A-ZÀ-Ú][a-zà-ú]{1,20}\s+(?:d[aeo]s?\s+)?[A-ZÀ-Ú][a-zà-ú]{1,20}(?:\s+[A-ZÀ-Ú][a-zà-ú]{1,20}){0,4})",
+                        "score": 0.7
+                    },
+                    {
+                        "pattern": r"(?i)(?:Dr|Sr|Sra|Prof|Profa|Eng)\.\s+[A-ZÀ-Ú][a-zà-ú]+(?:\s+[A-ZÀ-Ú][a-zà-ú]+)*",
+                        "score": 0.8
+                    }
+                ]
             )
         ]
         
@@ -285,7 +268,11 @@ class CustomAnalyzer:
             return docx_bytes
 
 def main():
-
+    st.set_page_config(
+        page_title="Anonimizador de Dados - LGPD",
+        page_icon="🔒",
+        layout="wide"
+    )
     
     st.title("Anonimizador de Dados - LGPD")
     
@@ -311,8 +298,6 @@ def main():
     
     **Dados Pessoais:**
     - Nomes (substituição)
-    
-    O sistema usa reconhecimento de padrões para detectar e anonimizar dados sensíveis em português.
     """)
     
     analyzer = CustomAnalyzer()
@@ -367,7 +352,6 @@ def main():
                     "anonimizado.docx",
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
-                
                 
             elif file.name.endswith('.pdf'):
                 pdf_anonymized = analyzer.process_pdf(content)
