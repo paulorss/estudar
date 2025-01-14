@@ -16,21 +16,15 @@ from presidio_anonymizer.entities import OperatorConfig
 
 @st.cache_resource
 def load_spacy_model():
-    """Load Portuguese language model, downloading it if necessary"""
+    """Load Portuguese language model"""
     try:
-        # Try to load the model
         return spacy.load("pt_core_news_lg")
-    except OSError:
-        # If model is not found, download it
-        st.info("Downloading Portuguese language model... This may take a while.")
-        subprocess.check_call([
-            sys.executable, 
-            "-m", 
-            "spacy", 
-            "download", 
-            "pt_core_news_lg"
-        ])
-        return spacy.load("pt_core_news_lg")
+    except Exception as e:
+        st.error(f"Erro ao carregar modelo de linguagem: {str(e)}")
+        st.stop()
+
+# Initialize spaCy
+nlp = load_spacy_model()
 
 # Initialize spaCy
 try:
