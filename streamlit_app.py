@@ -285,11 +285,7 @@ class CustomAnalyzer:
             return docx_bytes
 
 def main():
-    st.set_page_config(
-        page_title="Anonimizador de Dados - LGPD",
-        page_icon="🔒",
-        layout="wide"
-    )
+
     
     st.title("Anonimizador de Dados - LGPD")
     
