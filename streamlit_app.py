@@ -346,7 +346,7 @@ def main():
             if file.name.endswith('.csv'):
                 content_text = content.decode('utf-8')
                 result = analyzer.process_csv(content_text)
-                                    csv = result.to_csv(index=False)
+                csv = result.to_csv(index=False)
                 st.download_button(
                     "Download CSV Anonimizado",
                     csv,
@@ -377,6 +377,7 @@ def main():
                     "anonimizado.docx",
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
+                
                 
             elif file.name.endswith('.pdf'):
                 pdf_anonymized = analyzer.process_pdf(content)
